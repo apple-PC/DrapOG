@@ -1,0 +1,48 @@
+DrapOG/                          ← 项目根目录
+├── index.html                   开发入口
+├── serve.py                     开发服务器
+├── build.py                     打包脚本（后续）
+│
+├── System/                      系统
+│   ├── BIOS/
+│   │   ├── bios.js
+│   │   ├── post.js
+│   │   └── menu.js
+│   ├── Boot/
+│   │   ├── cmd.js
+│   │   ├── gui.js
+│   │   ├── safe.js
+│   │   └── recovery.js
+│   ├── Kernel/
+│   │   ├── boot.dbyte
+│   │   ├── kernel.dbyte
+│   │   ├── scheduler.dbyte
+│   │   ├── ipc.dbyte
+│   │   ├── vfs.dbyte
+│   │   └── net.dbyte
+│   ├── Drivers/
+│   ├── Frameworks/
+│   └── Settings/
+│       ├── boot.json
+│       ├── bios.json
+│       └── Themes/
+│           ├── macos.theme.js
+│           └── win11.theme.js
+│
+├── Applications/                应用
+│   ├── Finder.app/
+│   ├── Terminal.app/
+│   ├── TextEdit.app/
+│   └── Settings.app/
+│
+├── Library/                     系统资料库
+│   ├── TMP/
+│   ├── Preferences/
+│   ├── Caches/
+│   ├── Logs/
+│   └── Fonts/
+│
+└── Users/                       用户
+    ├── .default/
+    ├── guest/
+    └── users.json

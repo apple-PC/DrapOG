@@ -1,0 +1,911 @@
+/**
+ * @file        drapcc.js
+ * @module      drapog/drapcc
+ * @summary     DrapLang 编译器（支持 syscall）
+ * @version     0.4.0
+ */
+
+/* ==================== 系统调用表 ==================== */
+const SYS_TABLE = {
+  'fs_read':    0x10,
+  'fs_write':   0x11,
+  'fs_exists':  0x12,
+  'fs_ls':      0x13,
+  'fs_mkdir':   0x14,
+  'fs_rm':      0x15,
+  'term_print': 0x30,
+  'time_now':   0x50,
+};
+
+const SYS_RET = {
+  'fs_read':    { kind: 'prim', name: 'str' },
+  'fs_write':   { kind: 'prim', name: 'i32' },
+  'fs_exists':  { kind: 'prim', name: 'i32' },
+  'fs_ls':      { kind: 'prim', name: 'str' },
+  'fs_mkdir':   { kind: 'prim', name: 'i32' },
+  'fs_rm':      { kind: 'prim', name: 'i32' },
+  'term_print': { kind: 'prim', name: 'i32' },
+  'time_now':   { kind: 'prim', name: 'i32' },
+};
+
+const SYS_ARGS = {
+  'fs_read':    1,
+  'fs_write':   2,
+  'fs_exists':  1,
+  'fs_ls':      1,
+  'fs_mkdir':   1,
+  'fs_rm':      1,
+  'term_print': 1,
+  'time_now':   0,
+};
+
+class Scope {
+  constructor(parent) {
+    this.parent = parent || null;
+    this.vars = new Map();
+    this.nextLocal = -1;
+  }
+  defineLocal(name, type) {
+    const off = this.nextLocal--;
+    this.vars.set(name, { offset: off, type });
+    return off;
+  }
+  defineParam(name, type, offset) {
+    this.vars.set(name, { offset, type });
+    return offset;
+  }
+  lookup(name) {
+    if (this.vars.has(name)) return this.vars.get(name);
+    if (this.parent) return this.parent.lookup(name);
+    return null;
+  }
+  localCount() { return -this.nextLocal - 1; }
+}
+
+export class DrapCC {
+  constructor(source) {
+    this.source = source;
+    this.instructions = [];
+    this.strings = [];
+    this.stringMap = new Map();
+    this.labelId = 0;
+    this.structs = new Map();
+    this.funcs = new Map();
+    this.curScope = null;
+    this.curFn = null;
+    this.loopStack = [];
+  }
+
+  compile() {
+    this.tokens = this.tokenize(this.source);
+    this.pos = 0;
+    const decls = this.parseProgram();
+
+    for (const d of decls) if (d.kind === 'struct') this.structs.set(d.name, d);
+    for (const d of decls) if (d.kind === 'fn') this.funcs.set(d.name, d);
+    for (const d of decls) if (d.kind === 'fn') this.genFn(d);
+
+    return { instructions: this.instructions, strings: this.strings };
+  }
+
+  /* ==================== 词法 ==================== */
+  tokenize(src) {
+    const tokens = [];
+    let i = 0;
+    const n = src.length;
+    while (i < n) {
+      const c = src[i];
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '/' && src[i + 1] === '*') {
+        i += 2;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        i += 2; continue;
+      }
+      if (c === '"') {
+        i++;
+        let s = '';
+        while (i < n && src[i] !== '"') {
+          if (src[i] === '\\') {
+            i++;
+            const e = src[i];
+            s += e === 'n' ? '\n' : e === 't' ? '\t' : e === 'r' ? '\r'
+               : e === '\\' ? '\\' : e === '"' ? '"' : e === '0' ? '\0' : e;
+            i++;
+          } else s += src[i++];
+        }
+        i++;
+        tokens.push({ type: 'STR', value: s }); continue;
+      }
+      if (c === "'") {
+        i++;
+        let s = '';
+        if (src[i] === '\\') {
+          i++;
+          const e = src[i];
+          s = e === 'n' ? '\n' : e === 't' ? '\t' : e === 'r' ? '\r' : e;
+          i++;
+        } else s = src[i++];
+        i++;
+        tokens.push({ type: 'CHAR', value: s }); continue;
+      }
+      if (/\d/.test(c)) {
+        let j = i;
+        while (j < n && /\d/.test(src[j])) j++;
+        tokens.push({ type: 'NUM', value: parseInt(src.slice(i, j), 10) });
+        i = j; continue;
+      }
+      if (/[A-Za-z_]/.test(c)) {
+        let j = i;
+        while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
+        tokens.push({ type: 'IDENT', value: src.slice(i, j) });
+        i = j; continue;
+      }
+      const two = src.substr(i, 2);
+      if (['==','!=','<=','>=','&&','||','->'].includes(two)) {
+        tokens.push({ type: 'OP', value: two }); i += 2; continue;
+      }
+      if ('(){}[]=+-*/%<>!;:,.&|^'.includes(c)) {
+        tokens.push({ type: 'OP', value: c }); i++; continue;
+      }
+      throw new Error('词法错误：未知字符 "' + c + '"');
+    }
+    tokens.push({ type: 'EOF', value: null });
+    return tokens;
+  }
+
+  peek(k) { return this.tokens[this.pos + (k || 0)]; }
+  next() { return this.tokens[this.pos++]; }
+  is(v) {
+    const t = this.peek();
+    return (t.type === 'IDENT' && t.value === v) || (t.type === 'OP' && t.value === v);
+  }
+  accept(v) { if (this.is(v)) { this.pos++; return true; } return false; }
+  expect(v) {
+    if (this.accept(v)) return;
+    throw new Error('语法错误：期望 "' + v + '"，实际 "' + (this.peek().value || '<eof>') + '"');
+  }
+
+  /* ==================== 语法 ==================== */
+  parseProgram() {
+    const decls = [];
+    while (this.peek().type !== 'EOF') {
+      const t = this.peek();
+      if (t.type === 'IDENT' && t.value === 'struct') decls.push(this.parseStruct());
+      else if (t.type === 'IDENT' && (t.value === 'fn' || t.value === 'entry')) decls.push(this.parseFn());
+      else throw new Error('语法错误：顶层不认识 "' + t.value + '"');
+    }
+    return decls;
+  }
+
+  parseStruct() {
+    this.expect('struct');
+    const name = this.next().value;
+    this.expect('{');
+    const fields = [];
+    while (!this.is('}')) {
+      const fname = this.next().value;
+      this.expect(':');
+      const ftype = this.parseType();
+      fields.push({ name: fname, type: ftype });
+      this.accept(',');
+      this.accept(';');
+    }
+    this.expect('}');
+    this.accept(';');
+    return { kind: 'struct', name, fields };
+  }
+
+  parseFn() {
+    const isEntry = this.accept('entry');
+    this.expect('fn');
+    const name = this.next().value;
+    this.expect('(');
+    const params = [];
+    if (!this.is(')')) {
+      while (true) {
+        const pname = this.next().value;
+        this.expect(':');
+        const ptype = this.parseType();
+        params.push({ name: pname, type: ptype });
+        if (!this.accept(',')) break;
+      }
+    }
+    this.expect(')');
+    let retType = { kind: 'prim', name: 'void' };
+    if (this.accept('->')) retType = this.parseType();
+    this.expect('{');
+    const body = this.parseBlockBody();
+    this.expect('}');
+    return { kind: 'fn', name, params, retType, body, isEntry };
+  }
+
+  parseType() {
+    const t = this.next();
+    if (t.type !== 'IDENT') throw new Error('期望类型名，实际 "' + t.value + '"');
+    if (this.accept('[')) {
+      const elem = this.parseType();
+      this.expect(']');
+      return { kind: 'array', elem };
+    }
+    return { kind: 'prim', name: t.value };
+  }
+
+  parseBlockBody() {
+    const body = [];
+    while (!this.is('}') && this.peek().type !== 'EOF') body.push(this.parseStmt());
+    return body;
+  }
+
+  parseStmt() {
+    const t = this.peek();
+
+    if (this.is('{')) {
+      this.next();
+      const body = this.parseBlockBody();
+      this.expect('}');
+      return { kind: 'block', body };
+    }
+
+    if (t.type === 'IDENT') {
+      if (t.value === 'let') return this.parseLet();
+      if (t.value === 'if') return this.parseIf();
+      if (t.value === 'while') return this.parseWhile();
+      if (t.value === 'return') return this.parseReturn();
+      if (t.value === 'break') { this.next(); this.accept(';'); return { kind: 'break' }; }
+      if (t.value === 'continue') { this.next(); this.accept(';'); return { kind: 'continue' }; }
+      if (t.value === 'term_print' || t.value === 'term_println') return this.parsePrint();
+      const nx = this.peek(1);
+      if (nx && nx.type === 'OP' && ['=', '+=', '-=', '*=', '/='].includes(nx.value)) {
+        return this.parseAssign();
+      }
+    }
+
+    const expr = this.parseExpr();
+    this.accept(';');
+    return { kind: 'exprstmt', expr };
+  }
+
+  parseLet() {
+    this.expect('let');
+    const name = this.next().value;
+    let type = null;
+    if (this.accept(':')) type = this.parseType();
+    let init = null;
+    if (this.accept('=')) init = this.parseExpr();
+    this.accept(';');
+    return { kind: 'let', name, type, init };
+  }
+
+  parseAssign() {
+    const name = this.next().value;
+    const op = this.next().value;
+    const value = this.parseExpr();
+    this.accept(';');
+    return { kind: 'assign', name, op, value };
+  }
+
+  parseIf() {
+    this.expect('if');
+    this.expect('(');
+    const cond = this.parseExpr();
+    this.expect(')');
+    const then = this.parseStmt();
+    let alt = null;
+    if (this.accept('else')) alt = this.parseStmt();
+    return { kind: 'if', cond, then, alt };
+  }
+
+  parseWhile() {
+    this.expect('while');
+    this.expect('(');
+    const cond = this.parseExpr();
+    this.expect(')');
+    const body = this.parseStmt();
+    return { kind: 'while', cond, body };
+  }
+
+  parseReturn() {
+    this.expect('return');
+    let expr = null;
+    if (!this.is(';') && !this.is('}')) expr = this.parseExpr();
+    this.accept(';');
+    return { kind: 'return', expr };
+  }
+
+  parsePrint() {
+    const fn = this.next().value;
+    this.expect('(');
+    const args = [];
+    if (!this.is(')')) {
+      while (true) {
+        args.push(this.parseExpr());
+        if (!this.accept(',')) break;
+      }
+    }
+    this.expect(')');
+    this.accept(';');
+    return { kind: 'print', fn, args };
+  }
+
+  /* ==================== 表达式 ==================== */
+  parseExpr() { return this.parseOr(); }
+
+  parseOr() {
+    let left = this.parseAnd();
+    while (this.is('||')) { this.next(); left = { kind: 'bin', op: '||', left, right: this.parseAnd() }; }
+    return left;
+  }
+  parseAnd() {
+    let left = this.parseEq();
+    while (this.is('&&')) { this.next(); left = { kind: 'bin', op: '&&', left, right: this.parseEq() }; }
+    return left;
+  }
+  parseEq() {
+    let left = this.parseCmp();
+    while (this.is('==') || this.is('!=')) {
+      const op = this.next().value;
+      left = { kind: 'bin', op, left, right: this.parseCmp() };
+    }
+    return left;
+  }
+  parseCmp() {
+    let left = this.parseAdd();
+    while (this.is('<') || this.is('>') || this.is('<=') || this.is('>=')) {
+      const op = this.next().value;
+      left = { kind: 'bin', op, left, right: this.parseAdd() };
+    }
+    return left;
+  }
+  parseAdd() {
+    let left = this.parseMul();
+    while (this.is('+') || this.is('-')) {
+      const op = this.next().value;
+      left = { kind: 'bin', op, left, right: this.parseMul() };
+    }
+    return left;
+  }
+  parseMul() {
+    let left = this.parseUnary();
+    while (this.is('*') || this.is('/') || this.is('%')) {
+      const op = this.next().value;
+      left = { kind: 'bin', op, left, right: this.parseUnary() };
+    }
+    return left;
+  }
+  parseUnary() {
+    if (this.is('-')) { this.next(); return { kind: 'neg', expr: this.parseUnary() }; }
+    if (this.is('!')) { this.next(); return { kind: 'not', expr: this.parseUnary() }; }
+    return this.parsePostfix();
+  }
+
+  parsePostfix() {
+    let e = this.parsePrimary();
+    while (true) {
+      if (this.is('(')) {
+        this.next();
+        const args = [];
+        if (!this.is(')')) {
+          while (true) {
+            args.push(this.parseExpr());
+            if (!this.accept(',')) break;
+          }
+        }
+        this.expect(')');
+        if (e.kind !== 'ident') throw new Error('只能调用命名函数');
+        e = { kind: 'call', name: e.name, args };
+      } else if (this.is('[')) {
+        this.next();
+        const idx = this.parseExpr();
+        this.expect(']');
+        e = { kind: 'index', obj: e, index: idx };
+      } else if (this.is('.')) {
+        this.next();
+        const name = this.next().value;
+        if (this.is('(')) {
+          this.next();
+          const args = [];
+          if (!this.is(')')) {
+            while (true) {
+              args.push(this.parseExpr());
+              if (!this.accept(',')) break;
+            }
+          }
+          this.expect(')');
+          e = { kind: 'methodcall', obj: e, method: name, args };
+        } else {
+          e = { kind: 'member', obj: e, name };
+        }
+      } else break;
+    }
+    return e;
+  }
+
+  parsePrimary() {
+    const t = this.peek();
+
+    // ---- syscall 表达式 ----
+    if (t.type === 'IDENT' && t.value === 'syscall') {
+      this.next();
+      const nameTok = this.peek();
+      if (nameTok.type !== 'IDENT') throw new Error('syscall 后期望名字，实际 "' + nameTok.value + '"');
+      const name = this.next().value;
+      this.expect('(');
+      const args = [];
+      if (!this.is(')')) {
+        while (true) {
+          args.push(this.parseExpr());
+          if (!this.accept(',')) break;
+        }
+      }
+      this.expect(')');
+      return { kind: 'syscall', name, args };
+    }
+
+    if (t.type === 'NUM') { this.next(); return { kind: 'num', value: t.value }; }
+    if (t.type === 'STR') { this.next(); return { kind: 'str', value: t.value }; }
+    if (t.type === 'CHAR') { this.next(); return { kind: 'num', value: t.value.charCodeAt(0) }; }
+    if (t.type === 'IDENT') {
+      if (t.value === 'true') { this.next(); return { kind: 'num', value: 1 }; }
+      if (t.value === 'false') { this.next(); return { kind: 'num', value: 0 }; }
+      this.next();
+      if (this.is('{')) {
+        this.next();
+        const fields = [];
+        while (!this.is('}')) {
+          const fname = this.next().value;
+          this.expect(':');
+          const val = this.parseExpr();
+          fields.push({ name: fname, value: val });
+          if (!this.accept(',')) break;
+        }
+        this.expect('}');
+        return { kind: 'structlit', name: t.value, fields };
+      }
+      return { kind: 'ident', name: t.value };
+    }
+    if (this.is('(')) {
+      this.next();
+      const e = this.parseExpr();
+      this.expect(')');
+      return e;
+    }
+    if (this.is('[')) {
+      this.next();
+      const items = [];
+      if (!this.is(']')) {
+        while (true) {
+          items.push(this.parseExpr());
+          if (!this.accept(',')) break;
+        }
+      }
+      this.expect(']');
+      return { kind: 'arraylit', items };
+    }
+    throw new Error('语法错误：无法解析表达式，遇到 "' + (t.value || '<eof>') + '"');
+  }
+
+  /* ==================== 代码生成 ==================== */
+  emit(op, args) { this.instructions.push({ op, args: args || [] }); }
+  newLabel(p) { return '._' + p + '_' + (this.labelId++); }
+  getStringId(s) {
+    if (this.stringMap.has(s)) return this.stringMap.get(s);
+    const id = this.strings.length;
+    this.strings.push(s);
+    this.stringMap.set(s, id);
+    return id;
+  }
+
+  genFn(fn) {
+    this.curFn = fn;
+    this.curScope = new Scope(null);
+    this.loopStack = [];
+
+    fn.params.forEach((p, i) => this.curScope.defineParam(p.name, p.type, 2 + i));
+    this.scanLocals(fn.body, this.curScope);
+
+    this.emit('LABEL', [fn.name]);
+    this.emit('ENTER', []);
+    const nLocals = this.curScope.localCount();
+    if (nLocals > 0) this.emit('ALLOC', [String(nLocals)]);
+
+    for (const stmt of fn.body) this.genStmt(stmt);
+
+    this.emit('LI', ['r0', '0']);
+    this.emit('LEAVE', []);
+    this.emit('RET', []);
+  }
+
+  scanLocals(stmts, scope) {
+    for (const s of stmts) {
+      if (s.kind === 'let') {
+        let t = s.type;
+        if (!t) {
+          const init = s.init;
+          if (init && init.kind === 'str') t = { kind: 'prim', name: 'str' };
+          else if (init && init.kind === 'syscall') t = SYS_RET[init.name] || { kind: 'prim', name: 'i32' };
+          else if (init && init.kind === 'arraylit') t = { kind: 'array', elem: { kind: 'prim', name: 'i32' } };
+          else if (init && init.kind === 'structlit') t = { kind: 'struct', name: init.name };
+          else t = { kind: 'prim', name: 'i32' };
+        }
+        scope.defineLocal(s.name, t);
+      } else if (s.kind === 'block') this.scanLocals(s.body, scope);
+      else if (s.kind === 'if') {
+        this.scanLocals([s.then], scope);
+        if (s.alt) this.scanLocals([s.alt], scope);
+      } else if (s.kind === 'while') {
+        this.scanLocals([s.body], scope);
+      }
+    }
+  }
+
+  genStmt(s) {
+    switch (s.kind) {
+      case 'let': return this.genLet(s);
+      case 'assign': return this.genAssign(s);
+      case 'exprstmt': this.genExpr(s.expr); return;
+      case 'if': return this.genIf(s);
+      case 'while': return this.genWhile(s);
+      case 'return': return this.genReturn(s);
+      case 'break': {
+        if (this.loopStack.length === 0) throw new Error('break 不在循环中');
+        this.emit('JMP', [this.loopStack[this.loopStack.length - 1].end]);
+        return;
+      }
+      case 'continue': {
+        if (this.loopStack.length === 0) throw new Error('continue 不在循环中');
+        this.emit('JMP', [this.loopStack[this.loopStack.length - 1].start]);
+        return;
+      }
+      case 'block': for (const st of s.body) this.genStmt(st); return;
+      case 'print': return this.genPrint(s);
+      default: throw new Error('未处理的语句: ' + s.kind);
+    }
+  }
+
+  genLet(s) {
+    const v = this.curScope.lookup(s.name);
+    if (!v) throw new Error('未分配局部变量: ' + s.name);
+    if (s.init) {
+      this.genExpr(s.init);
+      if (!s.type) v.type = this.inferType(s.init);
+    } else {
+      this.emit('LI', ['r0', '0']);
+    }
+    this.emit('STOREL', [String(v.offset), 'r0']);
+  }
+
+  genAssign(s) {
+    const v = this.curScope.lookup(s.name);
+    if (!v) throw new Error('未定义变量: ' + s.name);
+    this.genExpr(s.value);
+    if (s.op === '=') {
+      this.emit('STOREL', [String(v.offset), 'r0']);
+    } else {
+      this.emit('LOADL', [String(v.offset), 'r1']);
+      const m = { '+=': 'ADD', '-=': 'SUB', '*=': 'MUL', '/=': 'DIV' };
+      this.emit(m[s.op], ['r2', 'r1', 'r0']);
+      this.emit('STOREL', [String(v.offset), 'r2']);
+      this.emit('MOV', ['r0', 'r2']);
+    }
+  }
+
+  genIf(s) {
+    const elseL = this.newLabel('else');
+    const endL = this.newLabel('endif');
+    this.genExpr(s.cond);
+    this.emit('JZ', [elseL]);
+    this.genStmt(s.then);
+    if (s.alt) {
+      this.emit('JMP', [endL]);
+      this.emit('LABEL', [elseL]);
+      this.genStmt(s.alt);
+      this.emit('LABEL', [endL]);
+    } else {
+      this.emit('LABEL', [elseL]);
+    }
+  }
+
+  genWhile(s) {
+    const startL = this.newLabel('wstart');
+    const endL = this.newLabel('wend');
+    this.emit('LABEL', [startL]);
+    this.genExpr(s.cond);
+    this.emit('JZ', [endL]);
+    this.loopStack.push({ start: startL, end: endL });
+    this.genStmt(s.body);
+    this.loopStack.pop();
+    this.emit('JMP', [startL]);
+    this.emit('LABEL', [endL]);
+  }
+
+  genReturn(s) {
+    if (s.expr) this.genExpr(s.expr);
+    else this.emit('LI', ['r0', '0']);
+    this.emit('LEAVE', []);
+    this.emit('RET', []);
+  }
+
+  genPrint(s) {
+    for (const arg of s.args) {
+      this.genExpr(arg);
+      const t = this.inferType(arg);
+      if (this.isStrType(t)) this.emit('PRINTSTR', ['r0']);
+      else this.emit('PRINTINT', ['r0']);
+    }
+    if (s.fn === 'term_println') this.emit('PRINTLN', []);
+  }
+
+  genExpr(node) {
+    switch (node.kind) {
+      case 'num': this.emit('LI', ['r0', String(node.value)]); return;
+      case 'str': {
+        const id = this.getStringId(node.value);
+        this.emit('STR', [String(id), 'r0']);
+        return;
+      }
+      case 'ident': {
+        const v = this.curScope.lookup(node.name);
+        if (!v) throw new Error('未定义变量: ' + node.name);
+        this.emit('LOADL', [String(v.offset), 'r0']);
+        return;
+      }
+      case 'neg': {
+        this.genExpr(node.expr);
+        this.emit('LI', ['r1', '0']);
+        this.emit('SUB', ['r0', 'r1', 'r0']);
+        return;
+      }
+      case 'not': {
+        this.genExpr(node.expr);
+        this.emit('LI', ['r1', '0']);
+        this.emit('EQ', ['r0', 'r0', 'r1']);
+        return;
+      }
+      case 'bin': return this.genBin(node);
+      case 'call': return this.genCall(node);
+      case 'methodcall': return this.genMethodCall(node);
+      case 'index': return this.genIndex(node);
+      case 'member': return this.genMember(node);
+      case 'arraylit': return this.genArrayLit(node);
+      case 'structlit': return this.genStructLit(node);
+      case 'syscall': return this.genSyscall(node);
+      default: throw new Error('未处理的表达式: ' + node.kind);
+    }
+  }
+
+  genSyscall(node) {
+    const num = SYS_TABLE[node.name];
+    if (num === undefined) throw new Error('未知系统调用: ' + node.name);
+    const expected = SYS_ARGS[node.name];
+    if (node.args.length !== expected) {
+      throw new Error(node.name + ' 需要 ' + expected + ' 个参数，实际 ' + node.args.length + ' 个');
+    }
+    const n = node.args.length;
+    // 从右到左求值，除最左（第一个参数）外都压栈
+    for (let i = n - 1; i >= 1; i--) {
+      this.genExpr(node.args[i]);
+      this.emit('PUSH', ['r0']);
+    }
+    // 第一个参数求值到 r0，然后送入 r1
+    if (n >= 1) {
+      this.genExpr(node.args[0]);
+      this.emit('MOV', ['r1', 'r0']);
+    }
+    // 依次弹出到 r2, r3
+    if (n >= 2) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r2', 'r0']);
+    }
+    if (n >= 3) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r3', 'r0']);
+    }
+    this.emit('SYSCALL', [String(num)]);
+  }
+
+  genBin(node) {
+    const lt = this.inferType(node.left);
+    const rt = this.inferType(node.right);
+
+    if (node.op === '+' && (this.isStrType(lt) || this.isStrType(rt))) {
+      this.genExpr(node.left);
+      this.emit('PUSH', ['r0']);
+      this.genExpr(node.right);
+      this.emit('MOV', ['r1', 'r0']);
+      this.emit('POP', ['r0']);
+      this.emit('STRCAT', ['r0', 'r1']);
+      return;
+    }
+
+    if ((node.op === '==' || node.op === '!=') && this.isStrType(lt) && this.isStrType(rt)) {
+      this.genExpr(node.left);
+      this.emit('PUSH', ['r0']);
+      this.genExpr(node.right);
+      this.emit('MOV', ['r1', 'r0']);
+      this.emit('POP', ['r0']);
+      this.emit('STREQ', ['r0', 'r1']);
+      if (node.op === '!=') {
+        this.emit('LI', ['r1', '1']);
+        this.emit('SUB', ['r0', 'r1', 'r0']);
+      }
+      return;
+    }
+
+    if (node.op === '&&' || node.op === '||') {
+      const endL = this.newLabel(node.op === '&&' ? 'andend' : 'orend');
+      this.genExpr(node.left);
+      if (node.op === '&&') {
+        this.emit('JZ', [endL]);
+        this.genExpr(node.right);
+        this.emit('LI', ['r1', '0']);
+        this.emit('NE', ['r0', 'r0', 'r1']);
+        this.emit('LABEL', [endL]);
+      } else {
+        const lFalse = this.newLabel('orf');
+        this.emit('JZ', [lFalse]);
+        this.emit('LI', ['r0', '1']);
+        this.emit('JMP', [endL]);
+        this.emit('LABEL', [lFalse]);
+        this.genExpr(node.right);
+        this.emit('LI', ['r1', '0']);
+        this.emit('NE', ['r0', 'r0', 'r1']);
+        this.emit('LABEL', [endL]);
+      }
+      return;
+    }
+
+    this.genExpr(node.left);
+    this.emit('PUSH', ['r0']);
+    this.genExpr(node.right);
+    this.emit('MOV', ['r1', 'r0']);
+    this.emit('POP', ['r0']);
+    const map = {
+      '+': 'ADD', '-': 'SUB', '*': 'MUL', '/': 'DIV', '%': 'MOD',
+      '<': 'LT', '>': 'GT', '<=': 'LE', '>=': 'GE', '==': 'EQ', '!=': 'NE',
+    };
+    const inst = map[node.op];
+    if (!inst) throw new Error('不支持的运算符: ' + node.op);
+    this.emit(inst, ['r2', 'r0', 'r1']);
+    this.emit('MOV', ['r0', 'r2']);
+  }
+
+  genCall(node) {
+    if (node.name === 'len') {
+      const t = this.inferType(node.args[0]);
+      this.genExpr(node.args[0]);
+      if (this.isStrType(t)) this.emit('STRLEN', ['r0']);
+      else this.emit('ARRLEN', ['r0']);
+      return;
+    }
+    const fn = this.funcs.get(node.name);
+    if (!fn) throw new Error('未定义函数: ' + node.name);
+    if (fn.params.length !== node.args.length) {
+      throw new Error('参数个数不符: ' + node.name + ' 需要 ' + fn.params.length + ' 个，实际 ' + node.args.length + ' 个');
+    }
+    for (let i = node.args.length - 1; i >= 0; i--) {
+      this.genExpr(node.args[i]);
+      this.emit('PUSH', ['r0']);
+    }
+    this.emit('CALL', [node.name]);
+    if (node.args.length > 0) {
+      this.emit('ADDSP', [String(node.args.length)]);
+    }
+  }
+
+  genMethodCall(node) {
+    if (node.method === 'push') {
+      if (node.args.length !== 1) throw new Error('push 需要 1 个参数');
+      this.genExpr(node.obj);
+      this.emit('PUSH', ['r0']);
+      this.genExpr(node.args[0]);
+      this.emit('MOV', ['r1', 'r0']);
+      this.emit('POP', ['r0']);
+      this.emit('ARRPUSH', ['r0', 'r1']);
+      return;
+    }
+    throw new Error('未知方法: ' + node.method);
+  }
+
+  genIndex(node) {
+    this.genExpr(node.obj);
+    this.emit('PUSH', ['r0']);
+    this.genExpr(node.index);
+    this.emit('MOV', ['r1', 'r0']);
+    this.emit('POP', ['r0']);
+    this.emit('ARRGET', ['r0', 'r1', 'r2']);
+    this.emit('MOV', ['r0', 'r2']);
+  }
+
+  genMember(node) {
+    if (node.name === 'len') {
+      const t = this.inferType(node.obj);
+      this.genExpr(node.obj);
+      if (this.isStrType(t)) this.emit('STRLEN', ['r0']);
+      else this.emit('ARRLEN', ['r0']);
+      return;
+    }
+    this.genExpr(node.obj);
+    const objType = this.inferType(node.obj);
+    let fieldIdx = -1;
+    if (objType && objType.kind === 'struct') {
+      const sd = this.structs.get(objType.name);
+      if (sd) fieldIdx = sd.fields.findIndex(f => f.name === node.name);
+    }
+    if (fieldIdx < 0) throw new Error('未知字段: ' + node.name);
+    this.emit('FLDGET', ['r0', String(fieldIdx), 'r1']);
+    this.emit('MOV', ['r0', 'r1']);
+  }
+
+  genArrayLit(node) {
+    this.emit('NEWARR', [String(node.items.length), 'r0']);
+    this.emit('MOV', ['r7', 'r0']);
+    for (let i = 0; i < node.items.length; i++) {
+      this.genExpr(node.items[i]);
+      this.emit('ARRSET', ['r7', String(i), 'r0']);
+    }
+    this.emit('MOV', ['r0', 'r7']);
+  }
+
+  genStructLit(node) {
+    const sd = this.structs.get(node.name);
+    if (!sd) throw new Error('未定义结构体: ' + node.name);
+    this.emit('NEWOBJ', [String(sd.fields.length), 'r0']);
+    this.emit('MOV', ['r7', 'r0']);
+    for (const f of node.fields) {
+      const idx = sd.fields.findIndex(sf => sf.name === f.name);
+      if (idx < 0) throw new Error('未知字段: ' + f.name);
+      this.genExpr(f.value);
+      this.emit('FLDSET', ['r7', String(idx), 'r0']);
+    }
+    this.emit('MOV', ['r0', 'r7']);
+  }
+
+  /* ==================== 类型推断 ==================== */
+  isStrType(t) { return t && t.kind === 'prim' && t.name === 'str'; }
+
+  inferType(node) {
+    if (!node) return { kind: 'prim', name: 'i32' };
+    switch (node.kind) {
+      case 'num': return { kind: 'prim', name: 'i32' };
+      case 'str': return { kind: 'prim', name: 'str' };
+      case 'syscall': return SYS_RET[node.name] || { kind: 'prim', name: 'i32' };
+      case 'ident': {
+        const v = this.curScope ? this.curScope.lookup(node.name) : null;
+        return v ? v.type : { kind: 'prim', name: 'i32' };
+      }
+      case 'bin': {
+        const lt = this.inferType(node.left);
+        const rt = this.inferType(node.right);
+        if (node.op === '+' && (this.isStrType(lt) || this.isStrType(rt))) {
+          return { kind: 'prim', name: 'str' };
+        }
+        return { kind: 'prim', name: 'i32' };
+      }
+      case 'call': {
+        const fn = this.funcs.get(node.name);
+        if (fn) return fn.retType;
+        if (node.name === 'len') return { kind: 'prim', name: 'i32' };
+        return { kind: 'prim', name: 'i32' };
+      }
+      case 'arraylit': return { kind: 'array', elem: { kind: 'prim', name: 'i32' } };
+      case 'structlit': return { kind: 'struct', name: node.name };
+      case 'member': {
+        if (node.name === 'len') return { kind: 'prim', name: 'i32' };
+        const objT = this.inferType(node.obj);
+        if (objT.kind === 'struct') {
+          const sd = this.structs.get(objT.name);
+          if (sd) {
+            const f = sd.fields.find(f => f.name === node.name);
+            if (f) return f.type;
+          }
+        }
+        return { kind: 'prim', name: 'i32' };
+      }
+      case 'index': return { kind: 'prim', name: 'i32' };
+      case 'neg': case 'not': return { kind: 'prim', name: 'i32' };
+      case 'methodcall': return { kind: 'prim', name: 'void' };
+    }
+    return { kind: 'prim', name: 'i32' };
+  }
+}
