@@ -15,6 +15,84 @@ import { DrapSYS } from '../../drapog.sys.js';
 
 const screen = document.getElementById('screen');
 
+/* ============================================================
+   DrapLang GUI 应用的宿主桥接
+   —— DrapLang 程序在 VM 里跑事件循环（win_get_event），
+      通过 win_* 工具绘制 / 收事件；本桥接负责：
+      1) 创建真实 WM 窗口（appId='__drapapp__'）
+      2) 把 VM 的绘制指令（drawOps）重放到真实 canvas
+      3) 把真实鼠标 / 键盘事件注入 VM 的事件队列
+   ============================================================ */
+
+// 颜色数组 → CSS rgb 串
+function _rgb(c) {
+  return 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+}
+
+const drapAppBridge = {
+  // 重放该窗口的绘制指令（坐标已是内容区局部坐标，wm 已 translate）
+  render(ctx, win, wm) {
+    const sys = win.__sys;
+    if (!sys) return;
+    const st = sys.drapWins.get(win.id);
+    if (!st) return;
+    if (st.title) win.title = st.title;   // DrapLang 改了标题则同步
+    for (const op of st.drawOps) {
+      if (op.op === 'text') {
+        ctx.fillStyle = _rgb(op.color);
+        ctx.font = op.font + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(op.text, op.x, op.y);
+      } else if (op.op === 'fill') {
+        ctx.fillStyle = _rgb(op.color);
+        ctx.fillRect(op.x, op.y, op.w, op.h);
+      } else if (op.op === 'stroke') {
+        ctx.strokeStyle = _rgb(op.color);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(op.x, op.y, op.w, op.h);
+      }
+    }
+  },
+  onMouseDown(lx, ly, win, wm) {
+    const sys = win.__sys;
+    if (sys) sys.injectWinEvent(win.id, 'click ' + Math.round(lx) + ' ' + Math.round(ly));
+  },
+  onKeyDown(e, win, wm) {
+    const sys = win.__sys;
+    if (sys) sys.injectWinEvent(win.id, 'key ' + e.key);
+    return true;
+  },
+};
+
+// 启动一个 DrapLang 编写的 GUI 应用：编译源 → 建 VM+sys → 跑事件循环
+function launchDrapApp(wm, vfs, source) {
+  let program;
+  try {
+    program = new DrapCC(source).compile();
+  } catch (err) {
+    console.error('DrapLang 应用编译失败', err);
+    return null;
+  }
+  const vm = new VM();
+  vm.load(program);
+  const sys = new DrapSYS({
+    vm,
+    vfs,
+    out: () => {},
+    onWinCreate: ({ title, w, h }) => {
+      const win = wm.createWindow({ title, w, h, appId: '__drapapp__' });
+      win.__sys = sys;
+      return win.id;
+    },
+    onWinClose: (winId) => { wm.closeWindow(winId); },
+  });
+  vm.sys = sys;
+  // 跑 VM：内部事件循环会在 win_get_event 处阻塞，由真实事件唤醒
+  vm.run().catch(err => console.error('DrapLang 应用运行错误', err));
+  return sys;
+}
+
 export function startGUI(opts = {}) {
   return new Promise(resolve => {
     // DPR 高清
@@ -37,6 +115,7 @@ export function startGUI(opts = {}) {
     const wm = new WindowManager(screen);
     wm.registerApp('finder',   createFinderApp({ vfs }));
     wm.registerApp('terminal', createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }));
+    wm.registerApp('__drapapp__', drapAppBridge);   // DrapLang GUI 应用的宿主桥接
 
     /* -------- 事件 -------- */
     let lastDown = { t: 0, x: 0, y: 0 };
@@ -119,6 +198,17 @@ export function startGUI(opts = {}) {
     // 启动 Finder + Terminal 各一个
     wm.launchApp({ id: 'finder',   letter: 'F', title: 'Finder' });
     wm.launchApp({ id: 'terminal', letter: '>', title: 'Terminal' });
+
+    // 自举验证：自动启动一个用 DrapLang 编写的 GUI 应用（证明 GUI 能由 DrapLang 自举）
+    (async () => {
+      try {
+        const url = new URL('../app_gui.drap', import.meta.url);
+        const src = await (await fetch(url)).text();
+        launchDrapApp(wm, vfs, src);
+      } catch (err) {
+        console.warn('DrapLang 示例加载失败（可忽略）', err);
+      }
+    })();
 
     let running = true;
     function loop() {

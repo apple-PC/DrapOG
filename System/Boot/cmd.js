@@ -2,7 +2,7 @@
  * @file        System/Boot/cmd.js
  * @module      drapog/boot/cmd
  * @summary     CMD 模式引导（支持滚动 + 系统调用）
- * @version     0.5.0
+ * @version     0.7.0
  */
 
 import { VM } from '../../drapog.vm.js';
@@ -10,6 +10,7 @@ import { DrapCC } from '../../drapcc.js';
 import { DrapShell } from '../../drapog.shell.js';
 import { VFS } from '../../drapog.vfs.js';
 import { DrapSYS } from '../../drapog.sys.js';
+import { makeLineWriter } from '../../drapog.stream.js';
 
 const screen = document.getElementById('screen');
 
@@ -267,50 +268,6 @@ export function startCMD() {
         await startGUI({ vfs });
       },
       getDemoSource,
-      runDemo: async () => {
-        const src = getDemoSource();
-        pushLine('编译 demo.drap...');
-        draw();
-        try {
-          const program = new DrapCC(src).compile();
-          pushLine('编译完成，' + program.instructions.length + ' 条指令');
-          pushLine('执行中...');
-          pushLine('---');
-          draw();
-          let lastLen = 0;
-          let pending = '';
-          const vm = new VM();
-          vm.load(program);
-          const sys = new DrapSYS({
-            vm,
-            vfs,
-            out: s => {
-              // 系统调用直接输出：直接 push 一行
-              const ls = String(s).split('\n');
-              for (const l of ls) pushLine(l);
-              draw();
-            },
-          });
-          vm.sys = sys;
-          vm.onOutput = partial => {
-            const fresh = partial.slice(lastLen);
-            lastLen = partial.length;
-            if (!fresh) return;
-            pending += fresh;
-            const parts = pending.split('\n');
-            pending = parts.pop();          // 最后一个可能是不完整的行
-            for (const l of parts) pushLine(l);
-            draw();
-          };
-          await vm.run();
-          if (pending) { pushLine(pending); pending = ''; }
-          pushLine('---');
-          pushLine('执行完成');
-        } catch (err) {
-          pushLine('编译/执行错误: ' + err.message);
-        }
-        draw();
-      }
     });
 
     function onResize() { draw(); }

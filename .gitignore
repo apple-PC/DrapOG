@@ -1,3 +1,9 @@
 .DS_Store
 *.log
 _dev/__pycache__/
+
+# WorkBuddy 项目数据（非源码，含本地记忆）
+.workbuddy/
+
+# 运行时 VFS 用户目录（浏览器版由内存 VFS 重建，无需入库）
+Users/

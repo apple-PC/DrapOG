@@ -2,7 +2,7 @@
  * @file        drapog.vm.js
  * @module      drapog/vm
  * @summary     DrapVM 虚拟机（支持系统调用）
- * @version     0.4.0
+ * @version     0.6.0
  */
 
 import { unpack } from './drapog.dbyte.js';
@@ -15,7 +15,7 @@ export class VM {
     this.entryPC = undefined;
     this.onOutput = onOutput || (() => {});
     this.sys = null;   // DrapSYS 实例（由外部挂载）
-    this.maxSteps = 100000000;
+    this.maxSteps = 1000000;  // P0-4：1e6 步内掐死无 syscall 的死循环；长驻交互程序（如 Shell）在 _doSyscall 处重置预算，永不撞线
 
     if (program) this.load(program);
   }
@@ -132,9 +132,11 @@ export class VM {
   async _doSyscall(ins) {
     if (!this.sys) throw new Error('VM: 未挂载系统调用层（DrapSYS）');
     const num = parseInt(ins.args[0], 10);
-    const args = [this.regs[1], this.regs[2], this.regs[3]];
+    // SYSCALL 传参约定：r1..r3 + r6（r4 为帧指针 FP、r5 为栈指针 SP、r7 为编译器临时寄存器，全部避开）
+    const args = [this.regs[1], this.regs[2], this.regs[3], this.regs[6]];
     const r = await this.sys.dispatch(num, args);
     this.regs[0] = typeof r === 'number' ? r : 0;
+    this.steps = 0;   // P0-4：每次系统调用（yield 点）重置步数预算，长驻交互程序（B7 Shell）永不撞线
     this.pc++;
   }
 
@@ -256,6 +258,38 @@ export class VM {
         const s1 = this._getStr(this.getR(args[0]));
         const s2 = this._getStr(this.getR(args[1]));
         this.setR(args[0], s1 === s2 ? 1 : 0);
+        this.pc++; return;
+      }
+      case 'STRGET': {
+        // STRGET dst, src, idx —— dst = src[idx] 的码点（i32）
+        const s = this._getStr(this.getR(args[1]));
+        const i = this.opnd(args[2]);
+        if (i < 0 || i >= s.length) throw new Error('VM: 字符串索引越界 ' + i + '/' + s.length);
+        this.setR(args[0], s.charCodeAt(i));
+        this.pc++; return;
+      }
+      case 'STRSUB': {
+        // STRSUB src, start, dst —— dst = src[start:]，结果写回新堆字符串
+        const s = this._getStr(this.getR(args[0]));
+        const start = this.opnd(args[1]);
+        const ptr = this.heap.length;
+        this.heap.push({ __type: 'str', value: s.slice(start) });
+        this.setR(args[2], ptr);
+        this.pc++; return;
+      }
+      case 'STRSPLIT': {
+        // STRSPLIT src, delim, dst —— dst = array<stringptr>，按单字符 delim 切分（保留空 token）
+        const s = this._getStr(this.getR(args[0]));
+        const delim = String.fromCharCode(this.opnd(args[1]));
+        const items = [];
+        for (const p of s.split(delim)) {
+          const ptr = this.heap.length;
+          this.heap.push({ __type: 'str', value: p });
+          items.push(ptr);
+        }
+        const arrPtr = this.heap.length;
+        this.heap.push({ __type: 'arr', items });
+        this.setR(args[2], arrPtr);
         this.pc++; return;
       }
       case 'PRINTSTR': {

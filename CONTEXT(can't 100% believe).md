@@ -75,25 +75,26 @@
 - CMD 模式终端（含 PageUp/PageDown/滚轮滚动）
 - GUI 模式（桌面 + 窗口管理器 + Dock + 菜单栏）
 - VFS（内存 + 真实磁盘 + IndexedDB 自动挂载）
-- Shell（help/clear/echo/run/exit/gui/pwd/ls/cd/mkdir/touch/cat/rm/mount/remount/umount/df/save/load/dump/asm/dis/cc）
+- Shell 用 **DrapLang 重写**（自举第一步）：System/shell.drap 是第一个用 DrapLang 写的系统组件，REPL 全程只通过 syscall 调用底层工具；宿主命令（mount/cc/load/save/asm/dis/dump/run…）经 term_hostcmd 委托回 JS 版 executeLegacy；shell.drap 缺失时自动回退 JS 版
 - DrapLang 编译器：函数、字符串、数组、结构体、syscall
-- DrapVM：45 条指令（含 SYSCALL / ADDSP）
-- DBYTE 格式（pack/unpack/hexdump）
+- DrapLang 字符串支持：索引 s[i]（码点）/ 切片 substr / 切分 split（编译器语法糖 + VM 指令 STRGET/STRSUB/STRSPLIT）
+- DrapVM：48 条指令（含 SYSCALL / ADDSP / STRGET / STRSUB / STRSPLIT）
+- DBYTE 格式（pack/unpack/hexdump，版本 0x0102）
 - DrapAS 汇编器（.dasm → .dbyte）
 - DrapDis 反汇编器（.dbyte → .dasm）
 - 无损往返：.drap → .dbyte → .dasm → .dbyte（字节一致）
-- DrapSYS 系统调用层（fs_read / fs_write / fs_exists / fs_ls / fs_mkdir / fs_rm / term_print / time_now）
+- DrapSYS 系统调用层（fs_read / fs_write / fs_exists / fs_ls / fs_mkdir / fs_rm / fs_chdir / fs_realpath / term_print / term_read / term_clear / term_exit / term_gui / term_hostcmd / term_setcwd / time_now）
+- P0 修复：term_print 双路径统一（drapog.stream.js）、Shell _split 转义（\" \\ 单引号 空 token）、maxSteps 混合方案（1e6 + 每次 syscall 重置预算）
 - 用 DrapLang 写的第一个程序：读磁盘配置文件并打印
 - 完整开发闭环：写 .drap → cc 编译 → load 运行
 - Finder（浏览真实磁盘）
 - Terminal（GUI 内嵌）
 - 自动挂载（刷新后恢复文件夹句柄）
+- GUI 系统调用层（win_create / win_close / win_set_title / win_focus / win_text / win_fill_rect / win_stroke_rect / win_set_color / win_set_font / win_get_event / win_invalidate / win_atoi / itoa）—— DrapLang 经此自举出窗口 / 绘制 / 输入
+- GUI 自举：System/app_gui.drap 是第一个完全用 DrapLang 编写的 GUI 应用（事件循环 + 点击变色主题），由 System/Boot/gui.js 的 launchDrapApp 宿主桥接驱动（建真实 WM 窗口、重放 drawOps、注入鼠标/键盘事件），test_gui.mjs 6 项断言全绿
 
 未完成：
 - DrapLang 事件处理程序（event fn）
-- DrapLang 字符串索引 / 切片
-- DrapLang 输入读取（term_read）
-- Shell 用 DrapLang 重写（自举第一步）
 - 窗口管理器用 DrapLang 重写
 - 应用全部用 DrapLang 重写
 - 主题系统（macOS / Win11 双主题）
@@ -222,18 +223,18 @@ DrapLang 源码 (.drap)
 - 下标：arr[i]
 - 内置函数：len(x)
 
-### 当前 VM 支持的指令（43 + 1）
+### 当前 VM 支持的指令（48 条）
 
 LABEL LI MOV ADD SUB MUL DIV MOD
 LT LE GT GE EQ NE
 JMP JZ JNZ PUSH POP
 CALL RET ENTER LEAVE ALLOC
 LOADL STOREL
-STR STRCAT STRLEN STREQ PRINTSTR
+STR STRCAT STRLEN STREQ STRGET STRSUB STRSPLIT PRINTSTR
 PRINT PRINTINT PRINTLN
 NEWARR ARRGET ARRSET ARRLEN ARRPUSH
 NEWOBJ FLDGET FLDSET
-ADDSP HLT
+ADDSP HLT SYSCALL
 
 ### 堆对象类型
 
@@ -247,9 +248,9 @@ r0  累加器 / 返回值
 r1  操作数 / syscall 参数 1
 r2  操作数 / syscall 参数 2
 r3  操作数 / syscall 参数 3
-r4  fp 帧指针
+r4  fp 帧指针（**绝不可用于 syscall 传参**，见下方警告）
 r5  sp 栈指针
-r6  临时（表达式求值）
+r6  临时（表达式求值）/ syscall 参数 4（仅 4 参数 syscall 使用）
 r7  临时（数组/结构体构造）
 
 ### 栈帧结构
@@ -318,7 +319,7 @@ B. 系统调用层（当前正在做，设计已完成）
         term_print / time_now
 - B5. 用 DrapLang 写读配置文件的小程序测试
 - B6. 事件机制（INT 0x81，event fn）
-- B7. Shell 用 DrapLang 重写
+- B7. Shell 用 DrapLang 重写 ✅（System/shell.drap，首个自举组件）
 
 C. GUI 补完
 - C1. Finder 返回 / 前进 / 上一级按钮
@@ -383,8 +384,9 @@ r0  返回值
 r1  syscall 参数 1
 r2  syscall 参数 2
 r3  syscall 参数 3
+r6  syscall 参数 4（仅 4 参数 syscall 使用）
 
-最多 3 个参数。超过的暂不支持。
+最多 4 个参数（r1/r2/r3/r6）。**注意：r4 是帧指针 FP，绝不可用于 syscall 传参**——早期 4 参数 syscall（win_fill_rect / win_stroke_rect）曾误用 r4 覆盖 FP，导致帧指针错乱、函数内局部变量访问全部失效，表现为异步唤醒后字符串比较恒失败、close 不返回等重大 bug；已在 0.6.0 改为 r6。
 
 ### SYSCALL 指令
 
@@ -441,12 +443,35 @@ syscall 返回类型由编译器根据名字给出（SYS_RET 表）。
   0x13  fs_ls(path)                → str（换行分隔）
   0x14  fs_mkdir(path)             → i32
   0x15  fs_rm(path)                → i32
+  0x16  fs_chdir(path)             → str（返回归一化绝对路径）
+  0x17  fs_realpath(base, path)    → str（纯路径归一化工具，~ / .. / . 由 VFS.normalize 处理）
 
 终端（0x30-0x3F）：
   0x30  term_print(str)            → i32
+  0x31  term_read()                → str（异步读入一行，宿主注入 onRead）
+  0x32  term_clear()               → i32（清屏，宿主 onClear 钩子）
+  0x33  term_exit()                → i32（退出 Shell，置 terminated 标志，VM 自然停机后宿主收尾）
+  0x34  term_gui()                 → i32（切到 GUI，宿主 onSwitchGUI 钩子）
+  0x35  term_hostcmd(line)         → i32（把一行交给宿主执行，宿主专属命令 mount/cc/load…）
+  0x36  term_setcwd(str)           → i32（同步工作目录给宿主，供提示符显示）
 
 时间（0x50-0x5F）：
   0x50  time_now()                 → i64
+
+窗口 / 绘制 / 输入（0x40-0x4F，GUI 自举底层工具）：
+  0x40  win_create(title, w, h)        → i32（创建窗口，返回 id 并设为当前窗口，自动推首帧 paint）
+  0x41  win_close(winId)               → i32（推 close 事件并关闭真实窗口）
+  0x42  win_set_title(winId, title)    → i32
+  0x4b  win_focus(winId)               → i32（设为当前绘制/输入窗口）
+  0x43  win_text(x, y, str)            → i32（绘制文本，缓冲到 drawOps）
+  0x44  win_fill_rect(x, y, w, h)      → i32（填充矩形，**4 参数**）
+  0x45  win_stroke_rect(x, y, w, h)    → i32（描边矩形，**4 参数**）
+  0x46  win_set_color(r, g, b)         → i32（设置当前绘制颜色）
+  0x47  win_set_font(size)             → i32（设置当前字体大小）
+  0x48  win_get_event()                → str（取事件：队列非空立即返回；否则阻塞挂起 resolver，由宿主 injectWinEvent 唤醒）
+  0x49  win_invalidate(winId)          → i32（请求重绘，推 paint 事件）
+  0x4a  win_atoi(str)                  → i32（事件坐标解析）
+  0x4c  itoa(n)                        → str（整数转字符串，便于 GUI/终端显示数字）
 
 ### 错误处理
 
@@ -496,16 +521,55 @@ B6 事件机制：
   syscall ui_on(ctrl, EVENT_CLICK, on_click)
   JS 侧 DOM 事件 → 打包成结构体写进 VM 内存 → INT 0x81
 
-B7 Shell 用 DrapLang 重写：
-  while (true) {
-    syscall term_print("guest@drapog$ ")
-    let line = syscall term_read()
-    if line == "exit" { return 0 }
-    ... 分发命令 ...
+B7 Shell 用 DrapLang 重写（✅ 已完成）：
+  // System/shell.drap —— 纯 DrapLang 的 REPL，只通过 syscall 调底层工具
+  entry fn main() -> i32 {
+    let cwd = "/Users/guest"
+    while (true) {
+      let line = syscall term_read()        // 宿主注入 onRead
+      let tokens = split(line, ' ')
+      let cmd: str = tokens[0]
+      if (cmd == "exit") { syscall term_exit(); break }
+      else if (cmd == "ls")  { let p = syscall fs_realpath(cwd, tokens[1]); ... syscall fs_ls(p) ... }
+      else if (cmd == "cd")  { cwd = syscall fs_realpath(...); syscall term_setcwd(cwd) }
+      ...
+      else { syscall term_hostcmd(line) }    // 宿主专属命令委托回 JS
+    }
   }
-  编译成 shell.dbyte，替换 drapog.shell.js
 
-这是自举第一步。
+  落地方式（与最初设想不同，更稳）：
+  - drapog.shell.js 不再自己解析命令，改为「宿主」：启动 VM 跑 shell.drap，
+    回车行经队列喂给 term_read；提示符/清屏/切 GUI/退出由宿主钩子（onCwd/onClear/onSwitchGUI/onExit）承接。
+  - shell.drap 缺失或编译失败时，自动回退到 JS 版 executeLegacy（保留原命令 switch）。
+  - 这是自举第一步；后续 WM / 应用可沿用同一模式（DrapLang 组件 + JS 宿主钩子）。
+
+### GUI 自举（DrapLang 事件循环 + 宿主桥接）
+
+与 Shell 自举同一模式：DrapLang 写 GUI 程序，只调用底层 win_* 工具；JS 宿主负责创建真实窗口、重放绘制、注入输入。
+
+DrapLang 端（System/app_gui.drap）：
+  entry fn main() -> i32 {
+    let win = syscall win_create("DrapApp 示例", 420, 320)
+    let mode = 0
+    while (true) {
+      let e = syscall win_get_event()        // 阻塞等事件（与 term_read 同续体机制）
+      if (e == "paint")      { ... 按 mode 绘制背景/按钮/文字 ... }
+      else if (split(e," ")[0] == "click") { 解析坐标；命中按钮区 → mode++ 并 win_invalidate(win) }
+      else if (split(e," ")[0] == "key")   { mode++ 并 win_invalidate(win) }
+      else if (e == "close") { return 0 }
+    }
+  }
+
+JS 宿主端（System/Boot/gui.js）：
+  - launchDrapApp(wm, vfs, source)：编译 → 建 VM+sys → 跑 vm.run()；onWinCreate 调 wm.createWindow({appId:'__drapapp__'})，并挂 win.__sys = sys
+  - drapAppBridge.render(ctx, win, wm)：重放 sys.drapWins.get(win.id).drawOps 到真实 canvas（fillRect / fillText / strokeRect）
+  - drapAppBridge.onMouseDown(lx, ly, win)：sys.injectWinEvent(win.id, 'click ' + lx + ' ' + ly)
+  - drapAppBridge.onKeyDown(e, win)：sys.injectWinEvent(win.id, 'key ' + e.key)
+
+事件驱动闭环：
+  VM 阻塞在 win_get_event（队列空）→ 宿主 injectWinEvent 调 _pushEvent → 若 st.resolver 存在则唤醒（resolve(pushStr(ev))）→ VM 续体恢复执行事件分支 → win_invalidate 推 paint → 下一轮 win_get_event 消费 paint 并清空 drawOps 重绘 → 再阻塞。
+
+验证：test_gui.mjs（mock 宿主，winId=1）断言首帧绘制、点击命中切换主题色、点击落空不切换、按键切换、close 正常停机，6 项全绿。
 
 ## 十五、B.1-B.5 完成情况
 
@@ -523,6 +587,23 @@ VM 指令集已扩到 45 条（加 SYSCALL、ADDSP）。
 DrapSYS 挂载在 vm.sys 上，VM.run() 遇 SYSCALL 时 await。
 VM 加 readStr(ptr) / pushStr(s) 供 DrapSYS 读写堆字符串。
 堆 0 号永远是空字符串哨兵 ""。
+
+## 十五、GUI 自举完成情况
+
+GUI 系统调用层（0x40-0x4c）               ✅（drapog.sys.js 0.4.0）
+编译器注册 win_* / itoa + 4 参数传参改 r6  ✅（drapcc.js 0.6.0）
+VM SYSCALL 传参扩展 r1..r3 + r6            ✅（drapog.vm.js 0.6.0）
+宿主桥接 launchDrapApp + drapAppBridge      ✅（System/Boot/gui.js）
+BIOS 菜单 GUI 入口                          ✅（System/BIOS/menu.js）
+DrapLang GUI 示例 app_gui.drap              ✅（事件循环 + 点击变色）
+test_gui.mjs 6 项断言                       ✅ 全绿
+回归：test_b7(7) / test_shell(12) / test_host(6)  ✅ 全绿
+
+关键修复（0.6.0）：
+  - 4 参数 syscall（win_fill_rect / win_stroke_rect）原误用 r4 传参，覆盖帧指针 FP，
+    导致异步唤醒后局部变量（含事件字符串）读取错乱、字符串比较恒失败、close 不返回；改回 r6。
+  - split 分隔符：双引号字符串 " " 在编译器里被当作字符串指针传给 STRSPLIT（期望字符码点），
+    导致 click/key 事件切分后的首 token 非 "click"/"key"；现编译器对 STR 型 delim 拆出首字符码点。
 ---
 
-最后更新：2026-10-10当前版本：0.2.0
+最后更新：2026-10-12　当前版本：0.6.0

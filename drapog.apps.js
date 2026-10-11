@@ -2,8 +2,10 @@
  * @file        drapog.apps.js
  * @module      drapog/apps
  * @summary     内置 GUI 应用（Finder / Terminal）
- * @version     0.1.0
+ * @version     0.3.0
  */
+
+import { makeLineWriter } from './drapog.stream.js';
 
 /* ============================================================
    Finder —— 文件管理器
@@ -204,51 +206,18 @@ export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
         clear: () => { s.lines = []; s.scrollTop = 0; },
         exit: () => { if (wm) wm.closeWindow(win.id); },
         switchToGUI: () => {},
-        runDemo: async () => {
-          const src = [
-            'entry fn main() -> i32 {',
-            '    term_print("Hello, DrapOG!\\n")',
-            '    let x = 0',
-            '    while (x < 3) {',
-            '        term_print("循环中...\\n")',
-            '        x = x + 1',
-            '    }',
-            '    term_print("完成\\n")',
-            '    return 0',
-            '}'
-          ].join('\n');
-          push('编译 demo.drap...');
-          try {
-            const program = new DrapCC(src).compile();
-            push('编译完成，' + program.instructions.length + ' 条指令');
-            push('---');
-            let lastLen = 0;
-            const vm = new VM();
-            vm.load(program);
-            vm.onOutput = partial => {
-              const fresh = partial.slice(lastLen);
-              lastLen = partial.length;
-              if (fresh) {
-                const ls = fresh.endsWith('\n') ? fresh.slice(0, -1) : fresh;
-                if (ls) for (const l of ls.split('\n')) push(l);
-              }
-            };
-            const sys = new DrapSYS({
-              vm,
-              vfs,
-              out: s => {
-                const ls = s.endsWith('\n') ? s.slice(0, -1) : s;
-                if (ls) for (const l of ls.split('\n')) push(l);
-                else push('');
-              },
-            });
-            vm.sys = sys;
-            await vm.run();
-            push('---');
-          } catch (err) {
-            push('编译/执行错误: ' + err.message);
-          }
-        },
+        getDemoSource: () => [
+          'entry fn main() -> i32 {',
+          '    term_print("Hello, DrapOG!\\n")',
+          '    let x = 0',
+          '    while (x < 3) {',
+          '        term_print("循环中...\\n")',
+          '        x = x + 1',
+          '    }',
+          '    term_print("完成\\n")',
+          '    return 0',
+          '}'
+        ].join('\n'),
       });
       states.set(win.id, s);
       push('DrapOG Terminal');

@@ -1,0 +1,125 @@
+// ============================================================
+//  System/shell.drap
+//  DrapLang 自举 Shell —— 第一个用 DrapLang 重写的系统组件
+//  设计原则：本文件不碰任何 JS，只通过 syscall 调用「底层工具」
+//    term_read / term_print / term_clear / term_gui / term_exit /
+//    term_setcwd / term_hostcmd / fs_ls / fs_read / fs_mkdir /
+//    fs_rm / fs_realpath / time_now / split / STREQ(==)
+//  命令分发用 == （编译器生成 STREQ，逐字符比较字符串）
+// ============================================================
+
+entry fn main() -> i32 {
+    let cwd = "/Users/guest"
+
+    while (true) {
+        let line = syscall term_read()
+        let tokens = split(line, ' ')
+        if (len(tokens) == 0) { continue }
+        if (tokens[0] == "") { continue }
+
+        let cmd: str = tokens[0]
+
+        if (cmd == "exit") {
+            syscall term_exit()
+            break
+
+        } else if (cmd == "help") {
+            term_print("DrapLang Shell 可用命令：\n")
+            term_print("  help              显示帮助\n")
+            term_print("  echo <text>       输出文本\n")
+            term_print("  pwd               打印工作目录\n")
+            term_print("  ls [path]         列目录\n")
+            term_print("  cd <path>         切换目录（支持 ~ / ..）\n")
+            term_print("  mkdir <path>      新建目录\n")
+            term_print("  cat <path>        查看文件\n")
+            term_print("  rm <path>         删除文件/空目录\n")
+            term_print("  clear             清屏\n")
+            term_print("  gui               切换到图形界面\n")
+            term_print("  time              显示时间戳\n")
+            term_print("  exit              退出 Shell\n")
+            term_print("  其余命令（mount/cc/load/save/asm/dis/dump/run...）由宿主处理\n")
+
+        } else if (cmd == "echo") {
+            let i = 1
+            while (i < len(tokens)) {
+                if (tokens[i] == "") { i = i + 1; continue }
+                term_print(tokens[i])
+                term_print(" ")
+                i = i + 1
+            }
+            term_print("\n")
+
+        } else if (cmd == "pwd") {
+            term_print(cwd)
+            term_print("\n")
+
+        } else if (cmd == "ls") {
+            let path = cwd
+            if (len(tokens) >= 2) { path = syscall fs_realpath(cwd, tokens[1]) }
+            let listing = syscall fs_ls(path)
+            if (listing == 0) {
+                term_print("ls: 无法访问 " + path + "\n")
+            } else {
+                term_print(listing)
+                term_print("\n")
+            }
+
+        } else if (cmd == "cd") {
+            if (len(tokens) < 2) {
+                cwd = "/Users/guest"
+            } else {
+                cwd = syscall fs_realpath(cwd, tokens[1])
+            }
+            syscall term_setcwd(cwd)
+
+        } else if (cmd == "mkdir") {
+            if (len(tokens) < 2) {
+                term_print("mkdir: 缺少操作数\n")
+            } else {
+                let p = syscall fs_realpath(cwd, tokens[1])
+                let r = syscall fs_mkdir(p)
+                if (r == 0) { term_print("mkdir: 创建失败 " + tokens[1] + "\n") }
+            }
+
+        } else if (cmd == "cat") {
+            if (len(tokens) < 2) {
+                term_print("cat: 缺少操作数\n")
+            } else {
+                let p = syscall fs_realpath(cwd, tokens[1])
+                let content = syscall fs_read(p)
+                if (content == 0) {
+                    term_print("cat: 无法读取 " + tokens[1] + "\n")
+                } else {
+                    term_print(content)
+                }
+            }
+
+        } else if (cmd == "rm") {
+            if (len(tokens) < 2) {
+                term_print("rm: 缺少操作数\n")
+            } else {
+                let p = syscall fs_realpath(cwd, tokens[1])
+                let r = syscall fs_rm(p)
+                if (r == 0) { term_print("rm: 删除失败 " + tokens[1] + "\n") }
+            }
+
+        } else if (cmd == "clear") {
+            syscall term_clear()
+
+        } else if (cmd == "gui") {
+            syscall term_gui()
+
+        } else if (cmd == "time") {
+            let t = syscall time_now()
+            term_print("时间戳: ")
+            term_print(t)
+            term_print("\n")
+
+        } else {
+            // 交给宿主处理（mount / cc / load / save / asm / dis / dump / run ...）
+            syscall term_hostcmd(line)
+        }
+    }
+
+    return 0
+}

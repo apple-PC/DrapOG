@@ -2,7 +2,7 @@
  * @file        drapcc.js
  * @module      drapog/drapcc
  * @summary     DrapLang 编译器（支持 syscall）
- * @version     0.4.0
+ * @version     0.6.0
  */
 
 /* ==================== 系统调用表 ==================== */
@@ -14,7 +14,29 @@ const SYS_TABLE = {
   'fs_mkdir':   0x14,
   'fs_rm':      0x15,
   'term_print': 0x30,
+  'term_read':  0x31,
+  'fs_chdir':   0x16,
+  'fs_realpath':0x17,
   'time_now':   0x50,
+  'term_clear': 0x32,
+  'term_exit':  0x33,
+  'term_gui':   0x34,
+  'term_hostcmd':0x35,
+  'term_setcwd':0x36,
+  // 窗口 / 绘制 / 输入（GUI 自举底层工具）
+  'win_create':     0x40,
+  'win_close':      0x41,
+  'win_set_title':  0x42,
+  'win_focus':      0x4b,
+  'win_text':       0x43,
+  'win_fill_rect':  0x44,
+  'win_stroke_rect':0x45,
+  'win_set_color':  0x46,
+  'win_set_font':   0x47,
+  'win_get_event':  0x48,
+  'win_invalidate': 0x49,
+  'win_atoi':       0x4a,
+  'itoa':           0x4c,
 };
 
 const SYS_RET = {
@@ -25,7 +47,28 @@ const SYS_RET = {
   'fs_mkdir':   { kind: 'prim', name: 'i32' },
   'fs_rm':      { kind: 'prim', name: 'i32' },
   'term_print': { kind: 'prim', name: 'i32' },
+  'term_read':  { kind: 'prim', name: 'str' },
+  'fs_chdir':   { kind: 'prim', name: 'str' },
+  'fs_realpath':{ kind: 'prim', name: 'str' },
   'time_now':   { kind: 'prim', name: 'i32' },
+  'term_clear': { kind: 'prim', name: 'i32' },
+  'term_exit':  { kind: 'prim', name: 'i32' },
+  'term_gui':   { kind: 'prim', name: 'i32' },
+  'term_hostcmd':{ kind: 'prim', name: 'i32' },
+  'term_setcwd':{ kind: 'prim', name: 'i32' },
+  'win_create':     { kind: 'prim', name: 'i32' },
+  'win_close':      { kind: 'prim', name: 'i32' },
+  'win_set_title':  { kind: 'prim', name: 'i32' },
+  'win_focus':      { kind: 'prim', name: 'i32' },
+  'win_text':       { kind: 'prim', name: 'i32' },
+  'win_fill_rect':  { kind: 'prim', name: 'i32' },
+  'win_stroke_rect':{ kind: 'prim', name: 'i32' },
+  'win_set_color':  { kind: 'prim', name: 'i32' },
+  'win_set_font':   { kind: 'prim', name: 'i32' },
+  'win_get_event':  { kind: 'prim', name: 'str' },
+  'win_invalidate': { kind: 'prim', name: 'i32' },
+  'win_atoi':       { kind: 'prim', name: 'i32' },
+  'itoa':           { kind: 'prim', name: 'str' },
 };
 
 const SYS_ARGS = {
@@ -36,7 +79,28 @@ const SYS_ARGS = {
   'fs_mkdir':   1,
   'fs_rm':      1,
   'term_print': 1,
+  'term_read':  0,
+  'fs_chdir':   1,
+  'fs_realpath':2,
   'time_now':   0,
+  'term_clear': 0,
+  'term_exit':  0,
+  'term_gui':   0,
+  'term_hostcmd':1,
+  'term_setcwd':1,
+  'win_create':     3,
+  'win_close':      1,
+  'win_set_title':  2,
+  'win_focus':      1,
+  'win_text':       3,
+  'win_fill_rect':  4,
+  'win_stroke_rect':4,
+  'win_set_color':  3,
+  'win_set_font':   1,
+  'win_get_event':  0,
+  'win_invalidate': 1,
+  'win_atoi':       1,
+  'itoa':           1,
 };
 
 class Scope {
@@ -524,6 +588,7 @@ export class DrapCC {
           const init = s.init;
           if (init && init.kind === 'str') t = { kind: 'prim', name: 'str' };
           else if (init && init.kind === 'syscall') t = SYS_RET[init.name] || { kind: 'prim', name: 'i32' };
+          else if (init && init.kind === 'call' && init.name === 'split') t = { kind: 'array', elem: { kind: 'prim', name: 'str' } };
           else if (init && init.kind === 'arraylit') t = { kind: 'array', elem: { kind: 'prim', name: 'i32' } };
           else if (init && init.kind === 'structlit') t = { kind: 'struct', name: init.name };
           else t = { kind: 'prim', name: 'i32' };
@@ -701,6 +766,10 @@ export class DrapCC {
       this.emit('POP', ['r0']);
       this.emit('MOV', ['r3', 'r0']);
     }
+    if (n >= 4) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r6', 'r0']);
+    }
     this.emit('SYSCALL', [String(num)]);
   }
 
@@ -778,6 +847,38 @@ export class DrapCC {
       else this.emit('ARRLEN', ['r0']);
       return;
     }
+    if (node.name === 'split') {
+      // split(src, delim) → STRSPLIT src, delim, dst；dst 存字符串指针数组，最后搬到 r0
+      // 约定：delim 传「单字符码点」(i32)。字符字面量 ' ' 已是码点；
+      // 双引号字符串 " " 需在此拆出首字符码点，否则会被当成字符串指针而误用。
+      if (node.args.length !== 2) throw new Error('split 需要 2 个参数');
+      this.genExpr(node.args[0]);          // 源字符串 → r0
+      this.emit('PUSH', ['r0']);
+      const delim = node.args[1];
+      if (delim.kind === 'str') {
+        const code = delim.value.length > 0 ? delim.value.charCodeAt(0) : 0;
+        this.emit('LI', ['r1', String(code)]);
+      } else {
+        this.genExpr(delim);               // 字符字面量 ' '（已是码点）或变量
+        this.emit('MOV', ['r1', 'r0']);
+      }
+      this.emit('POP', ['r0']);
+      this.emit('STRSPLIT', ['r0', 'r1', 'r2']);
+      this.emit('MOV', ['r0', 'r2']);
+      return;
+    }
+    if (node.name === 'substr') {
+      // substr(src, start) → STRSUB src, start, dst；dst 存新字符串指针，搬到 r0
+      if (node.args.length !== 2) throw new Error('substr 需要 2 个参数');
+      this.genExpr(node.args[0]);
+      this.emit('PUSH', ['r0']);
+      this.genExpr(node.args[1]);
+      this.emit('MOV', ['r1', 'r0']);
+      this.emit('POP', ['r0']);
+      this.emit('STRSUB', ['r0', 'r1', 'r2']);
+      this.emit('MOV', ['r0', 'r2']);
+      return;
+    }
     const fn = this.funcs.get(node.name);
     if (!fn) throw new Error('未定义函数: ' + node.name);
     if (fn.params.length !== node.args.length) {
@@ -808,6 +909,19 @@ export class DrapCC {
   }
 
   genIndex(node) {
+    const objT = this.inferType(node.obj);
+    if (this.isStrType(objT)) {
+      // 字符串索引：s[i] → 码点（i32），走 STRGET
+      this.genExpr(node.obj);
+      this.emit('PUSH', ['r0']);
+      this.genExpr(node.index);
+      this.emit('MOV', ['r1', 'r0']);
+      this.emit('POP', ['r0']);
+      this.emit('STRGET', ['r2', 'r0', 'r1']);
+      this.emit('MOV', ['r0', 'r2']);
+      return;
+    }
+    // 数组索引：走 ARRGET
     this.genExpr(node.obj);
     this.emit('PUSH', ['r0']);
     this.genExpr(node.index);
@@ -886,6 +1000,8 @@ export class DrapCC {
         const fn = this.funcs.get(node.name);
         if (fn) return fn.retType;
         if (node.name === 'len') return { kind: 'prim', name: 'i32' };
+        if (node.name === 'split') return { kind: 'array', elem: { kind: 'prim', name: 'str' } };
+        if (node.name === 'substr') return { kind: 'prim', name: 'str' };
         return { kind: 'prim', name: 'i32' };
       }
       case 'arraylit': return { kind: 'array', elem: { kind: 'prim', name: 'i32' } };
@@ -902,7 +1018,12 @@ export class DrapCC {
         }
         return { kind: 'prim', name: 'i32' };
       }
-      case 'index': return { kind: 'prim', name: 'i32' };
+      case 'index': {
+        const objT = this.inferType(node.obj);
+        if (this.isStrType(objT)) return { kind: 'prim', name: 'i32' };   // s[i] → 码点（i32）
+        if (objT && objT.kind === 'array') return objT.elem || { kind: 'prim', name: 'i32' };
+        return { kind: 'prim', name: 'i32' };
+      }
       case 'neg': case 'not': return { kind: 'prim', name: 'i32' };
       case 'methodcall': return { kind: 'prim', name: 'void' };
     }

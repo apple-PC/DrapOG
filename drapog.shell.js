@@ -1,11 +1,16 @@
 /**
  * @file        drapog.shell.js
  * @module      drapog/shell
- * @summary     DrapShell 命令行
- * @version     0.5.0
+ * @summary     DrapShell 命令行（宿主层）
+ * @version     0.7.0
+ * @description 自举后：本类只做「宿主」，运行 System/shell.drap（DrapLang REPL）。
+ *               REPL 经 term_read 拉行、经 syscall 调底层工具；宿主专属命令
+ *               （mount/cc/load/save/asm/dis/dump/run…）经 term_hostcmd 委托回本类的
+ *               executeLegacy。若 shell.drap 缺失/编译失败，自动回退到 JS 版 executeLegacy。
  */
 
 import { idbSet, idbGet, idbDelete } from './drapog.idb.js';
+import { makeLineWriter } from './drapog.stream.js';
 
 const IDB_KEY = 'rootHandle';
 
@@ -16,7 +21,105 @@ export class DrapShell {
     this.cwd = '/Users/guest';
   }
 
+  /* ============================================================
+     自举入口：跑 DrapLang REPL（宿主职责）
+     ============================================================ */
   async execute(line) {
+    if (!this.replStarted) {
+      try {
+        await this._ensureRepl();
+      } catch (e) {
+        this.replStarted = true;          // 不再重试，避免每次回车都重读 shell.drap
+        this.legacyMode = true;
+        if (this.io.print) this.io.print('DrapLang Shell 不可用，回退兼容模式：' + e.message);
+      }
+    }
+    if (this.legacyMode) return this.executeLegacy(line);
+    // 把这一行喂给 VM REPL 的 term_read 队列
+    if (this.inputWaiters.length > 0) {
+      const w = this.inputWaiters.shift();
+      w(line);
+    } else {
+      this.inputQueue.push(line);
+    }
+  }
+
+  // 启动 DrapLang Shell（脱离式：vm.run 在后台跑，exit 才自然停机）
+  async _ensureRepl() {
+    if (this.replStarted) return;
+    this.replStarted = true;
+    const src = await this.vfs.read('/System/shell.drap');
+    if (src === null) throw new Error('缺少 /System/shell.drap');
+    const { DrapCC } = await import('./drapcc.js');
+    const { VM } = await import('./drapog.vm.js');
+    const program = new DrapCC(src).compile();
+    const vm = new VM();
+    vm.load(program);
+    const w = makeLineWriter(l => { if (this.io.print) this.io.print(l); });
+    vm.onOutput = w.feed;
+    const sys = new DrapSYS({
+      vm, vfs: this.vfs,
+      out: s => { for (const l of String(s).split('\n')) if (this.io.print) this.io.print(l); },
+      onRead: () => this._readLine(),
+    });
+    sys.onCwd = c => { this.cwd = c; };
+    sys.onExit = () => { this._exited = true; };
+    sys.onClear = () => { if (this.io.clear) this.io.clear(); };
+    sys.onSwitchGUI = () => { if (this.io.switchToGUI) this.io.switchToGUI(); };
+    sys.hostExec = ln => this.executeLegacy(ln);   // 宿主专属命令委托回 JS 工具
+    vm.sys = sys;
+    this.sys = sys;
+    this.vm = vm;
+    this._replDone = vm.run()
+      .then(() => {
+        w.flush();
+        if (sys.terminated && this.io.exit) this.io.exit();   // 自然停机后由宿主收尾
+      })
+      .catch(err => {
+        if (this.io.print) this.io.print('Shell 运行错误：' + err.message);
+        this.legacyMode = true;
+      });
+  }
+
+  // term_read 的宿主实现：从输入队列/等待者取一行
+  _readLine() {
+    if (this.inputQueue.length > 0) return Promise.resolve(this.inputQueue.shift());
+    return new Promise(res => this.inputWaiters.push(res));
+  }
+
+  // 统一演示运行（run 命令）：编译并跑一段 demo 源，输出经 io.print
+  async _runDemo() {
+    const src = this.io.getDemoSource ? this.io.getDemoSource() : null;
+    if (!src) { if (this.io.print) this.io.print('run: 无演示源'); return; }
+    if (this.io.print) this.io.print('编译 demo.drap...');
+    try {
+      const { DrapCC } = await import('./drapcc.js');
+      const { VM } = await import('./drapog.vm.js');
+      const { DrapSYS } = await import('./drapog.sys.js');
+      const program = new DrapCC(src).compile();
+      if (this.io.print) this.io.print('编译完成，' + program.instructions.length + ' 条指令');
+      if (this.io.print) this.io.print('---');
+      const w = makeLineWriter(l => { if (this.io.print) this.io.print(l); });
+      const vm = new VM();
+      vm.load(program);
+      vm.onOutput = w.feed;
+      const sys = new DrapSYS({
+        vm, vfs: this.vfs,
+        out: s => { for (const l of String(s).split('\n')) if (this.io.print) this.io.print(l); },
+      });
+      vm.sys = sys;
+      await vm.run();
+      w.flush();
+      if (this.io.print) this.io.print('---');
+    } catch (err) {
+      if (this.io.print) this.io.print('编译/执行错误：' + err.message);
+    }
+  }
+
+  /* ============================================================
+     兼容模式 / 宿主专属命令（REPL 经 term_hostcmd 委托到这里）
+     ============================================================ */
+  async executeLegacy(line) {
     const t = line.trim();
     if (!t) return;
     const parts = this._split(t);
@@ -27,7 +130,7 @@ export class DrapShell {
       case 'help':    return this._cmdHelp();
       case 'clear':   return this.io.clear();
       case 'echo':    return this.io.print(args.join(' '));
-      case 'run':     return this.io.runDemo();
+      case 'run':     return await this._runDemo();
       case 'exit':    return this.io.exit();
       case 'gui':     return this.io.switchToGUI();
       case 'save':    return await this._cmdSave(args);
@@ -306,17 +409,8 @@ export class DrapShell {
       const { DrapSYS } = await import('./drapog.sys.js');
       const vm = new VM();
       vm.loadFromBytes(bytes);
-      let lastLen = 0;
-      let pending = '';
-      vm.onOutput = partial => {
-        const fresh = partial.slice(lastLen);
-        lastLen = partial.length;
-        if (!fresh) return;
-        pending += fresh;
-        const parts = pending.split('\n');
-        pending = parts.pop();
-        for (const l of parts) this.io.print(l);
-      };
+      const w = makeLineWriter(l => this.io.print(l));
+      vm.onOutput = w.feed;
       const sys = new DrapSYS({
         vm,
         vfs: this.vfs,
@@ -327,7 +421,7 @@ export class DrapShell {
       });
       vm.sys = sys;
       await vm.run();
-      if (pending) this.io.print(pending);
+      w.flush();
     } catch (e) {
       this.io.print('load: ' + e.message);
     }
@@ -410,16 +504,27 @@ export class DrapShell {
     const out = [];
     let cur = '';
     let inQuote = false;
-    for (let i = 0; i < line.length; i++) {
+    let quoteChar = '';
+    let i = 0;
+    const n = line.length;
+    const flush = () => { if (cur) { out.push(cur); cur = ''; } };
+    while (i < n) {
       const c = line[i];
-      if (c === '"') { inQuote = !inQuote; continue; }
-      if (!inQuote && /\s/.test(c)) {
-        if (cur) { out.push(cur); cur = ''; }
-        continue;
+      if (inQuote && c === '\\') {
+        const nx = line[i + 1];
+        if (nx === quoteChar || nx === '\\') { cur += nx; i += 2; continue; }
+        cur += c; i++; continue;          // 其它反斜杠原样保留
       }
-      cur += c;
+      if (!inQuote) {
+        if (c === '"' || c === "'") { flush(); inQuote = true; quoteChar = c; i++; continue; }
+        if (/\s/.test(c)) { flush(); i++; continue; }   // 未引号空白：折叠，不产生空 token
+      } else if (c === quoteChar) {
+        out.push(cur); cur = '';            // 闭引号：保留引号内内容（含空 token，如 echo ""）
+        inQuote = false; quoteChar = ''; i++; continue;
+      }
+      cur += c; i++;
     }
-    if (cur) out.push(cur);
+    flush();                                // 末尾 token（引号产生的空 token 已在闭引号处保留）
     return out;
   }
 }

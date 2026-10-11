@@ -2,11 +2,11 @@
  * @file        drapog.dbyte.js
  * @module      drapog/dbyte
  * @summary     DBYTE 可执行文件格式
- * @version     0.3.0
+ * @version     0.4.0
  */
 
 export const MAGIC = 0x50415244;
-export const VERSION = 0x0101;
+export const VERSION = 0x0102;
 export const HEADER_SIZE = 24;
 export const INSTR_SIZE = 8;
 
@@ -27,6 +27,9 @@ export const OPCODE = {
   HLT: 42,
   ADDSP: 43,
   SYSCALL: 44,
+  STRGET: 45,
+  STRSUB: 46,
+  STRSPLIT: 47,
 };
 
 export const OPNAME = {};
@@ -78,6 +81,9 @@ export const ARG_SPEC = {
   HLT:   [],
   ADDSP: ['i'],
   SYSCALL: ['i'],
+  STRGET: ['r', 'r', 'r'],
+  STRSUB: ['r', 'r', 'r'],
+  STRSPLIT: ['r', 'r', 'r'],
 };
 
 export function pack(program) {

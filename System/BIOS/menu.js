@@ -17,7 +17,8 @@ export function showBootMenu() {
 
     const items = [
       { key: '1', label: 'DrapOG CMD',      desc: '命令行模式',  action: 'cmd' },
-      { key: '2', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
+      { key: '2', label: 'DrapOG GUI',      desc: '图形界面',    action: 'gui' },
+      { key: '3', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
     ];
 
     let selected = 0;
@@ -66,6 +67,8 @@ export function showBootMenu() {
       cleanup();
       if (it.action === 'cmd') {
         import('../Boot/cmd.js').then(m => m.startCMD()).then(resolve);
+      } else if (it.action === 'gui') {
+        import('../Boot/gui.js').then(m => m.startGUI()).then(resolve);
       } else {
         // Setup 暂时不做
         ctx.fillStyle = '#000';
