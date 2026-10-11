@@ -21,7 +21,7 @@ export function showBootMenu() {
       { key: '3', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
     ];
 
-    let selected = 0;
+    let selected = 1;   // 默认高亮 GUI（手机上点按可交互，比键盘专用的 CMD 更适合自动启动）
     let countdown = 5;
 
     function draw() {
@@ -62,13 +62,25 @@ export function showBootMenu() {
       ctx.fillText('↑↓ 选择   Enter 确认   1/2 快捷选择', x, y);
     }
 
+    function showFatal(err) {
+      const ctx = screen.getContext('2d');
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, screen.width, screen.height);
+      ctx.fillStyle = '#f66';
+      ctx.font = '16px Consolas, monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('启动失败: ' + (err && err.message ? err.message : err), 20, 20);
+      console.error(err);
+    }
+
     function choose(idx) {
       const it = items[idx];
       cleanup();
       if (it.action === 'cmd') {
-        import('../Boot/cmd.js').then(m => m.startCMD()).then(resolve);
+        import('../Boot/cmd.js').then(m => m.startCMD()).then(resolve).catch(showFatal);
       } else if (it.action === 'gui') {
-        import('../Boot/gui.js').then(m => m.startGUI()).then(resolve);
+        import('../Boot/gui.js').then(m => m.startGUI()).then(resolve).catch(showFatal);
       } else {
         // Setup 暂时不做
         ctx.fillStyle = '#000';
