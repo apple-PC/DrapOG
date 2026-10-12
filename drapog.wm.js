@@ -2,7 +2,7 @@
  * @file        drapog.wm.js
  * @module      drapog/wm
  * @summary     窗口管理器（支持应用内容）
- * @version     0.3.0
+ * @version     0.4.0
  */
 
 export class WindowManager {
@@ -20,9 +20,13 @@ export class WindowManager {
     this.DOCK_MARGIN = 8;
     this.DOCK_ICON = 44;
 
+    // 软键盘（移动端调用实体键盘用）
+    this.softKeyboard = { open: false };
+
     this.apps = [
       { id: 'finder',   letter: 'F', title: 'Finder' },
       { id: 'terminal', letter: '>', title: 'Terminal' },
+      { id: 'paint',    letter: '🎨', title: 'Paint' },
       { id: 'edit',     letter: 'T', title: 'TextEdit' },
       { id: 'settings', letter: '⚙', title: 'Settings' },
       { id: 'about',    letter: 'W', title: '关于本机' },
@@ -201,6 +205,18 @@ export class WindowManager {
   }
 
   onMouseDown(x, y) {
+    // 菜单栏（顶部）：键盘切换按钮命中区
+    if (y < this.MENU_BAR_H) {
+      if (this.hitMenuBar(x, y)) this.toggleSoftKeyboard();
+      return;   // 菜单栏区域不穿透到下方窗口
+    }
+
+    // 软键盘（覆盖层）：优先处理按键点击
+    if (this.softKeyboard.open) {
+      const k = this.hitSoftKeyboard(x, y);
+      if (k) { this._pressKey(k); return; }
+    }
+
     const hitD = this.hitDock(x, y);
     if (hitD) {
       if (hitD.type === 'app') this.launchApp(hitD.app);
@@ -276,6 +292,8 @@ export class WindowManager {
 
   getCursor(x, y) {
     if (this.dragState) return 'grabbing';
+    if (y < this.MENU_BAR_H && this.hitMenuBar(x, y)) return 'pointer';
+    if (this.softKeyboard.open && this.hitSoftKeyboard(x, y)) return 'pointer';
     const hitD = this.hitDock(x, y);
     if (hitD) return 'pointer';
     const w = this.hitTest(x, y);
@@ -292,7 +310,110 @@ export class WindowManager {
     return 'default';
   }
 
+  /* ==================== 软键盘 ==================== */
+
+  toggleSoftKeyboard() { this.softKeyboard.open = !this.softKeyboard.open; }
+
+  // 菜单栏右侧的键盘切换按钮
+  kbButtonRect(W) { return { x: W - 92, y: 4, w: 40, h: this.MENU_BAR_H - 8 }; }
+  hitMenuBar(x, y) {
+    const W = this.W();
+    const r = this.kbButtonRect(W);
+    return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+  }
+
+  // 软键盘布局（每行按键；w 为相对宽度，默认 1）
+  softKeys() {
+    return [
+      [ { label:'1',key:'1' },{ label:'2',key:'2' },{ label:'3',key:'3' },{ label:'4',key:'4' },
+        { label:'5',key:'5' },{ label:'6',key:'6' },{ label:'7',key:'7' },{ label:'8',key:'8' },
+        { label:'9',key:'9' },{ label:'0',key:'0' },{ label:'-',key:'-' },{ label:'=',key:'=' } ],
+      [ { label:'q',key:'q' },{ label:'w',key:'w' },{ label:'e',key:'e' },{ label:'r',key:'r' },
+        { label:'t',key:'t' },{ label:'y',key:'y' },{ label:'u',key:'u' },{ label:'i',key:'i' },
+        { label:'o',key:'o' },{ label:'p',key:'p' },{ label:'[',key:'[' },{ label:']',key:']' } ],
+      [ { label:'a',key:'a' },{ label:'s',key:'s' },{ label:'d',key:'d' },{ label:'f',key:'f' },
+        { label:'g',key:'g' },{ label:'h',key:'h' },{ label:'j',key:'j' },{ label:'k',key:'k' },
+        { label:'l',key:'l' },{ label:';',key:';' },{ label:'\'',key:'\'' } ],
+      [ { label:'z',key:'z' },{ label:'x',key:'x' },{ label:'c',key:'c' },{ label:'v',key:'v' },
+        { label:'b',key:'b' },{ label:'n',key:'n' },{ label:'m',key:'m' },{ label:',',key:',' },
+        { label:'.',key:'.' },{ label:'/',key:'/' } ],
+      [ { label:'空格',key:' ', w:3 },{ label:'⌫',key:'Backspace' },{ label:'↵',key:'Enter' } ],
+    ];
+  }
+
+  // 计算软键盘每个按键的屏幕矩形（渲染与命中共用，保证一致）
+  softKeyRects(W, H) {
+    const kb = this.softKeys();
+    const pad = 6, keyH = 40, gap = 5;
+    const rowsN = kb.length;
+    const panelH = rowsN * (keyH + gap) + pad * 2;
+    const y0 = H - this.DOCK_H - this.DOCK_MARGIN * 2 - 12 - panelH;
+    const x0 = 10, panelW = W - 20;
+    const rects = [];
+    for (let r = 0; r < rowsN; r++) {
+      const row = kb[r];
+      let totalW = 0;
+      for (const k of row) totalW += (k.w || 1);
+      const kw = (panelW - pad * 2 - gap * (row.length - 1)) / totalW;
+      let cx = x0 + pad;
+      const ry = y0 + pad + r * (keyH + gap);
+      for (const k of row) {
+        const w = kw * (k.w || 1);
+        rects.push({ x: cx, y: ry, w, h: keyH, key: k.key, label: k.label });
+        cx += w + gap;
+      }
+    }
+    return { rects, x0, y0, panelW, panelH };
+  }
+
+  hitSoftKeyboard(x, y) {
+    const W = this.W(), H = this.H();
+    const { rects } = this.softKeyRects(W, H);
+    for (const r of rects) {
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r;
+    }
+    return null;
+  }
+
+  // 把软键盘按键注入为合成按键事件，路由给当前焦点窗口（与真实键盘同一路径）
+  _pressKey(k) {
+    const synth = { key: k.key, preventDefault() {}, metaKey: false, ctrlKey: false, altKey: false };
+    this.onKeyDown(synth);
+  }
+
+  renderSoftKeyboard(W, H) {
+    if (!this.softKeyboard.open) return;
+    const { rects, x0, y0, panelW, panelH } = this.softKeyRects(W, H);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = 'rgba(18,18,24,0.97)';
+    this.roundRect(x0, y0, panelW, panelH, 12);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 0.5;
+    this.roundRect(x0, y0, panelW, panelH, 12);
+    ctx.stroke();
+    for (const r of rects) {
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      this.roundRect(r.x, r.y, r.w, r.h, 6);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      this.roundRect(r.x, r.y, r.w, r.h, 6);
+      ctx.stroke();
+      ctx.fillStyle = r.key === ' ' ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.92)';
+      ctx.font = '15px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(r.label === ' ' ? '空格' : r.label, r.x + r.w / 2, r.y + r.h / 2);
+    }
+    ctx.restore();
+  }
+
   launchApp(app) {
+    // 若应用实现了 launch（如 DrapLang 应用需自建 VM 窗口），优先调用
+    const impl = this.getApp(app.id);
+    if (impl && typeof impl.launch === 'function') { impl.launch(this); return; }
+
     const existing = this.windows.find(w => w.appId === app.id && w.minimized);
     if (existing) { this.restoreWindow(existing.id); return; }
     const offset = (this.windows.length % 5) * 24;
@@ -317,6 +438,7 @@ export class WindowManager {
     }
     this.renderMenuBar(W);
     this.renderDock(W, H);
+    this.renderSoftKeyboard(W, H);
   }
 
   renderWallpaper(W, H) {
@@ -475,6 +597,17 @@ export class WindowManager {
     ctx.font = '14px -apple-system, sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(hh + ':' + mm, W - 14, this.MENU_BAR_H / 2);
+
+    // 软键盘切换按钮（移动端用它调出实体键盘）
+    const kb = this.kbButtonRect(W);
+    ctx.fillStyle = this.softKeyboard.open ? 'rgba(10,132,255,0.45)' : 'rgba(255,255,255,0.14)';
+    this.roundRect(kb.x, kb.y, kb.w, kb.h, 7);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.font = '15px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⌨', kb.x + kb.w / 2, kb.y + kb.h / 2);
   }
 
   renderDock(W, H) {

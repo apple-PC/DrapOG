@@ -2,10 +2,24 @@
  * @file        System/BIOS/menu.js
  * @module      drapog/bios/menu
  * @summary     启动菜单
- * @version     0.1.0
+ * @version     0.2.0
  */
 
 const screen = document.getElementById('screen');
+
+/**
+ * 设备感知：判断是否为手机 / 触控设备
+ *  - 优先用 pointer:coarse（触控笔/手指，桌面鼠标是 fine）
+ *  - 退而求其次：有触控点且屏幕较小
+ */
+function isMobileDevice() {
+  try {
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+  } catch (e) {}
+  const touch = (navigator.maxTouchPoints || 0) > 0;
+  const small = Math.min(window.innerWidth, window.innerHeight) < 820;
+  return touch && small;
+}
 
 /**
  * 显示启动菜单，等待用户选择
@@ -21,7 +35,9 @@ export function showBootMenu() {
       { key: '3', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
     ];
 
-    let selected = 1;   // 默认高亮 GUI（手机上点按可交互，比键盘专用的 CMD 更适合自动启动）
+    // 设备感知默认：电脑（有鼠标）默认进 CMD，手机（触控）默认进 GUI
+    const mobile = isMobileDevice();
+    let selected = mobile ? 1 : 0;   // 0=CMD, 1=GUI
     let countdown = 5;
 
     function draw() {
@@ -42,7 +58,10 @@ export function showBootMenu() {
       ctx.fillStyle = '#666';
       ctx.font = '14px Consolas, monospace';
       ctx.fillText(`自动启动倒计时: ${countdown} 秒`, x, y);
-      y += 40;
+      y += 22;
+      ctx.fillStyle = '#4a9';
+      ctx.fillText(`自动进入: ${items[selected].label}（${mobile ? '检测到手机/触控' : '检测到电脑/鼠标'}）`, x, y);
+      y += 34;
 
       for (let i = 0; i < items.length; i++) {
         const it = items[i];

@@ -2,16 +2,63 @@
  * @file        drapog.apps.js
  * @module      drapog/apps
  * @summary     内置 GUI 应用（Finder / Terminal）
- * @version     0.3.0
+ * @version     0.4.0
  */
 
 import { makeLineWriter } from './drapog.stream.js';
 
 /* ============================================================
+   受保护的系统目录（进入需要权限）
+   ============================================================ */
+const PROTECTED = ['/System'];
+
+/* ============================================================
    Finder —— 文件管理器
+   顶部工具栏：上一级 / 新建文件夹 / 新建文本 / 刷新 / 删除
+   地址栏 + 列表 + 状态栏
+   新建时进入命名输入（支持实体键盘与软键盘）
+   进入 /System 等系统目录需弹窗授权
+   双击文件可预览内容
    ============================================================ */
 export function createFinderApp({ vfs }) {
   const states = new Map();
+
+  const TOOLBAR_H = 38;   // 工具栏高度
+  const ADDR_H = 26;      // 地址栏高度
+  const STATUS_H = 22;    // 状态栏高度
+  const ROW_H = 28;       // 列表行高
+
+  // 工具栏按钮定义（id / 图标 / 提示）
+  const TOOLBUTTONS = [
+    { id: 'parent',    icon: '↑',  tip: '上一级' },
+    { id: 'newFolder', icon: '📁', tip: '新建文件夹' },
+    { id: 'newFile',   icon: '📄', tip: '新建文本' },
+    { id: 'refresh',   icon: '⟳',  tip: '刷新' },
+    { id: 'delete',    icon: '🗑',  tip: '删除' },
+  ];
+
+  function buttonRects(win) {
+    const x0 = 8, y = 4, w = 34, h = 30, gap = 4;
+    return TOOLBUTTONS.map((b, i) => ({ ...b, x: x0 + i * (w + gap), y, w, h }));
+  }
+
+  // 权限弹窗矩形
+  function permRects(win) {
+    const bw = 260, bh = 132;
+    const bx = Math.round((win.w - bw) / 2), by = Math.round((win.h - bh) / 2);
+    const btnW = 100, btnH = 34;
+    return {
+      bx, by, bw, bh,
+      allow: { x: bx + 18, y: by + bh - 46, w: btnW, h: btnH },
+      deny:  { x: bx + bw - 18 - btnW, y: by + bh - 46, w: btnW, h: btnH },
+    };
+  }
+
+  function viewerRects(win) {
+    const bw = Math.min(win.w - 24, 360), bh = Math.min(win.h - 24, 300);
+    const bx = Math.round((win.w - bw) / 2), by = Math.round((win.h - bh) / 2);
+    return { bx, by, bw, bh, close: { x: bx + bw - 26, y: by + 6, w: 20, h: 20 } };
+  }
 
   async function refresh(win, state) {
     state.loading = true;
@@ -26,6 +73,46 @@ export function createFinderApp({ vfs }) {
     state.loading = false;
   }
 
+  // 导航：进入 target；若 target 落在受保护目录且未授权，则弹出权限请求
+  async function navigate(win, state, target) {
+    for (const p of PROTECTED) {
+      if (target === p || target.startsWith(p + '/')) {
+        if (!state.sysAccess) { state.permPrompt = { target }; return; }
+      }
+    }
+    state.cwd = target;
+    state.selected = -1;
+    state.error = null;
+    await refresh(win, state);
+  }
+
+  async function openViewer(win, state, name) {
+    const path = vfs.normalize(state.cwd, name);
+    let content = await vfs.read(path);
+    if (content === null || content === undefined) content = '(空或无法读取)';
+    state.viewer = { name, content: String(content), scroll: 0 };
+  }
+
+  async function doToolbar(win, state, id) {
+    if (id === 'parent') {
+      if (state.cwd !== '/') await navigate(win, state, vfs.normalize(state.cwd, '..'));
+    } else if (id === 'refresh') {
+      await refresh(win, state);
+    } else if (id === 'newFolder' || id === 'newFile') {
+      state.naming = { kind: id === 'newFolder' ? 'dir' : 'file', value: '' };
+    } else if (id === 'delete') {
+      if (state.selected < 0) return;
+      const it = state.items[state.selected];
+      if (!it) return;
+      if (state.cwd.startsWith('/System')) { state.error = '系统目录受保护，禁止删除'; return; }
+      const target = vfs.normalize(state.cwd, it.name);
+      const ok = await vfs.rm(target);
+      if (!ok) state.error = '删除失败（目录非空或不存在）';
+      state.selected = -1;
+      await refresh(win, state);
+    }
+  }
+
   function getState(win) {
     let s = states.get(win.id);
     if (!s) {
@@ -35,14 +122,18 @@ export function createFinderApp({ vfs }) {
         selected: -1,
         loading: false,
         error: null,
-        rowH: 26,
-        headerH: 32,
+        naming: null,        // { kind:'dir'|'file', value:string }
+        permPrompt: null,    // { target:string }
+        viewer: null,        // { name, content, scroll }
+        sysAccess: false,    // 本次会话是否已授权进入系统目录
       };
       states.set(win.id, s);
       refresh(win, s);
     }
     return s;
   }
+
+  function listTop(win) { return TOOLBAR_H + ADDR_H; }
 
   return {
     create(win) { getState(win); },
@@ -56,97 +147,284 @@ export function createFinderApp({ vfs }) {
       ctx.fillStyle = '#2a2a2e';
       ctx.fillRect(0, 0, W, H);
 
-      // 顶栏
+      /* ---------- 工具栏 ---------- */
       ctx.fillStyle = '#323237';
-      ctx.fillRect(0, 0, W, s.headerH);
+      ctx.fillRect(0, 0, W, TOOLBAR_H);
       ctx.strokeStyle = 'rgba(0,0,0,0.4)';
       ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, s.headerH);
-      ctx.lineTo(W, s.headerH);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, TOOLBAR_H); ctx.lineTo(W, TOOLBAR_H); ctx.stroke();
 
-      // 路径
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = '13px -apple-system, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(s.cwd, 12, s.headerH / 2 + 1);
+      for (const b of buttonRects(win)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        wm.roundRect(b.x, b.y, b.w, b.h, 6); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        wm.roundRect(b.x, b.y, b.w, b.h, 6); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = '16px -apple-system, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(b.icon, b.x + b.w / 2, b.y + b.h / 2);
+      }
 
-      // 列表
-      const listY = s.headerH;
-      const maxRows = Math.floor((H - listY) / s.rowH);
+      /* ---------- 地址栏 ---------- */
+      const ay = TOOLBAR_H;
+      ctx.fillStyle = '#26262b';
+      ctx.fillRect(0, ay, W, ADDR_H);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath(); ctx.moveTo(0, ay + ADDR_H); ctx.lineTo(W, ay + ADDR_H); ctx.stroke();
+
+      if (s.naming) {
+        // 命名输入态：地址栏变为输入框
+        ctx.fillStyle = '#9cf';
+        ctx.font = '12px -apple-system, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        const label = s.naming.kind === 'dir' ? '新建文件夹: ' : '新建文本: ';
+        ctx.fillText(label, 10, ay + ADDR_H / 2);
+        const lw = ctx.measureText(label).width;
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px -apple-system, sans-serif';
+        const val = s.naming.value;
+        ctx.fillText(val, 10 + lw + 2, ay + ADDR_H / 2);
+        const cw = ctx.measureText(val).width;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(10 + lw + 2 + cw, ay + 5, 2, ADDR_H - 10);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.cwd, 12, ay + ADDR_H / 2 + 1);
+      }
+
+      /* ---------- 列表 ---------- */
+      const top = listTop(win);
+      const maxRows = Math.max(0, Math.floor((H - top - STATUS_H) / ROW_H));
       const items = s.items.slice(0, maxRows);
 
       if (s.loading) {
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillText('读取中...', 20, listY + 30);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText('读取中...', 20, top + 20);
       } else if (s.error) {
         ctx.fillStyle = '#ff8080';
-        ctx.fillText(s.error, 20, listY + 30);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.error, 20, top + 20);
       } else if (items.length === 0) {
         ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.fillText('空文件夹', 20, listY + 30);
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText('空文件夹', 20, top + 20);
       } else {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          const y = listY + i * s.rowH;
+          const y = top + i * ROW_H;
           if (i === s.selected) {
             ctx.fillStyle = 'rgba(10,132,255,0.35)';
-            ctx.fillRect(0, y, W, s.rowH);
+            ctx.fillRect(0, y, W, ROW_H);
           }
           ctx.font = '16px -apple-system, "Apple Color Emoji", sans-serif';
-          ctx.textAlign = 'left';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
           ctx.fillStyle = '#ddd';
-          ctx.fillText(it.type === 'dir' ? '📁' : '📄', 10, y + s.rowH / 2 + 1);
+          ctx.fillText(it.type === 'dir' ? '📁' : '📄', 10, y + ROW_H / 2);
 
           ctx.fillStyle = it.type === 'dir' ? '#e8e8e8' : '#c8c8c8';
           ctx.font = '13px -apple-system, sans-serif';
-          ctx.fillText(it.name, 36, y + s.rowH / 2 + 1);
+          ctx.fillText(it.name, 36, y + ROW_H / 2);
         }
       }
 
-      // 状态栏
+      /* ---------- 状态栏 ---------- */
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(0, H - 22, W, 22);
+      ctx.fillRect(0, H - STATUS_H, W, STATUS_H);
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.font = '11px -apple-system, sans-serif';
-      ctx.fillText(items.length + ' 项', 10, H - 11);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const hint = s.naming ? '回车确认 · Esc 取消'
+                 : s.sysAccess ? '已授权系统目录' : (s.items.length + ' 项');
+      ctx.fillText(hint, 10, H - STATUS_H / 2);
+
+      /* ---------- 权限弹窗 ---------- */
+      if (s.permPrompt) {
+        const r = permRects(win);
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#2c2c33';
+        wm.roundRect(r.bx, r.by, r.bw, r.bh, 10); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        wm.roundRect(r.bx, r.by, r.bw, r.bh, 10); ctx.stroke();
+
+        ctx.fillStyle = '#ffd479';
+        ctx.font = '600 14px -apple-system, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('需要权限', r.bx + r.bw / 2, r.by + 24);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText('进入系统目录需要授权：', r.bx + r.bw / 2, r.by + 52);
+        ctx.fillStyle = '#9cf';
+        ctx.fillText(s.permPrompt.target, r.bx + r.bw / 2, r.by + 74);
+
+        // 允许
+        ctx.fillStyle = 'rgba(10,132,255,0.9)';
+        wm.roundRect(r.allow.x, r.allow.y, r.allow.w, r.allow.h, 6); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText('允许', r.allow.x + r.allow.w / 2, r.allow.y + r.allow.h / 2);
+        // 拒绝
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        wm.roundRect(r.deny.x, r.deny.y, r.deny.w, r.deny.h, 6); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillText('拒绝', r.deny.x + r.deny.w / 2, r.deny.y + r.deny.h / 2);
+      }
+
+      /* ---------- 文件预览 ---------- */
+      if (s.viewer) {
+        const r = viewerRects(win);
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#202026';
+        wm.roundRect(r.bx, r.by, r.bw, r.bh, 10); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        wm.roundRect(r.bx, r.by, r.bw, r.bh, 10); ctx.stroke();
+        // 标题
+        ctx.fillStyle = '#fff';
+        ctx.font = '600 13px -apple-system, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.viewer.name, r.bx + 12, r.by + 16);
+        // 关闭
+        ctx.fillStyle = 'rgba(255,95,87,0.9)';
+        wm.roundRect(r.close.x, r.close.y, r.close.w, r.close.h, 4); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '14px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('×', r.close.x + r.close.w / 2, r.close.y + r.close.h / 2);
+        // 文本
+        ctx.fillStyle = 'rgba(220,220,220,0.92)';
+        ctx.font = '12px Consolas, monospace';
+        ctx.textAlign = 'left';
+        const tx = r.bx + 12, tyBase = r.by + 36, lineH = 16;
+        const lines = s.viewer.content.split('\n');
+        const visLines = Math.floor((r.bh - 48) / lineH);
+        const start = Math.max(0, Math.min(s.viewer.scroll, lines.length - visLines));
+        for (let i = 0; i < visLines && i + start < lines.length; i++) {
+          const ln = lines[i + start];
+          ctx.fillText(ln.length > 60 ? ln.slice(0, 60) : ln, tx, tyBase + i * lineH);
+        }
+      }
     },
 
     async onMouseDown(lx, ly, win, wm) {
       const s = getState(win);
-      if (ly < s.headerH) return;
-      const idx = Math.floor((ly - s.headerH) / s.rowH);
+
+      // 权限弹窗优先
+      if (s.permPrompt) {
+        const r = permRects(win);
+        if (lx >= r.allow.x && lx <= r.allow.x + r.allow.w && ly >= r.allow.y && ly <= r.allow.y + r.allow.h) {
+          s.sysAccess = true;
+          const t = s.permPrompt.target;
+          s.permPrompt = null;
+          await navigate(win, s, t);
+        } else if (lx >= r.deny.x && lx <= r.deny.x + r.deny.w && ly >= r.deny.y && ly <= r.deny.y + r.deny.h) {
+          s.permPrompt = null;
+        }
+        return;
+      }
+
+      // 文件预览：点关闭
+      if (s.viewer) {
+        const r = viewerRects(win);
+        if (lx >= r.close.x && lx <= r.close.x + r.close.w && ly >= r.close.y && ly <= r.close.y + r.close.h) {
+          s.viewer = null;
+        }
+        return;
+      }
+
+      // 工具栏
+      if (ly < TOOLBAR_H) {
+        for (const b of buttonRects(win)) {
+          if (lx >= b.x && lx <= b.x + b.w && ly >= b.y && ly <= b.y + b.h) {
+            await doToolbar(win, s, b.id);
+            return;
+          }
+        }
+        return;
+      }
+
+      // 地址栏：命名态下点击取消
+      if (ly < listTop(win)) {
+        if (s.naming) s.naming = null;
+        return;
+      }
+
+      // 命名态：在列表区点击取消输入
+      if (s.naming) { s.naming = null; return; }
+
+      // 列表选择
+      const idx = Math.floor((ly - listTop(win)) / ROW_H);
       if (idx < 0 || idx >= s.items.length) { s.selected = -1; return; }
       s.selected = idx;
     },
 
     onDoubleClick(lx, ly, win, wm) {
       const s = getState(win);
-      if (ly < s.headerH) return;
-      const idx = Math.floor((ly - s.headerH) / s.rowH);
+      if (s.permPrompt || s.viewer || s.naming) return;
+      if (ly < listTop(win)) return;
+      const idx = Math.floor((ly - listTop(win)) / ROW_H);
       if (idx < 0 || idx >= s.items.length) return;
       const it = s.items[idx];
       if (it.type === 'dir') {
-        s.cwd = vfs.normalize(s.cwd, it.name);
-        s.selected = -1;
-        refresh(win, s);
+        navigate(win, s, vfs.normalize(s.cwd, it.name));
       } else {
-        // 双击文件：在标题栏显示
-        win.title = it.name;
+        openViewer(win, s, it.name);
       }
     },
 
     async onKeyDown(e, win, wm) {
       const s = getState(win);
+
+      // 命名输入态
+      if (s.naming) {
+        if (e.key === 'Enter') {
+          const v = s.naming.value.trim();
+          if (v) {
+            const target = vfs.normalize(s.cwd, v);
+            if (s.naming.kind === 'dir') await vfs.mkdir(target);
+            else await vfs.write(target, '');
+            s.naming = null;
+            await refresh(win, s);
+          } else { s.naming = null; }
+          return true;
+        }
+        if (e.key === 'Escape') { s.naming = null; return true; }
+        if (e.key === 'Backspace') { s.naming.value = s.naming.value.slice(0, -1); return true; }
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          s.naming.value += e.key; return true;
+        }
+        return true; // 命名态吞掉其它键
+      }
+
+      // 权限弹窗
+      if (s.permPrompt) {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'y' || e.key === 'Y') {
+          s.sysAccess = true;
+          const t = s.permPrompt.target;
+          s.permPrompt = null;
+          navigate(win, s, t);
+        } else if (e.key === 'Escape' || e.key === 'n' || e.key === 'N') {
+          s.permPrompt = null;
+        }
+        return true;
+      }
+
+      // 文件预览
+      if (s.viewer) {
+        if (e.key === 'Escape' || e.key === 'Enter') s.viewer = null;
+        else if (e.key === 'ArrowDown') s.viewer.scroll += 1;
+        else if (e.key === 'ArrowUp') s.viewer.scroll = Math.max(0, s.viewer.scroll - 1);
+        return true;
+      }
+
+      // 常规导航
       if (e.key === 'Backspace' || e.key === 'ArrowUp') {
         if (e.key === 'Backspace') {
-          if (s.cwd !== '/') {
-            s.cwd = vfs.normalize(s.cwd, '..');
-            s.selected = -1;
-            await refresh(win, s);
-          }
+          if (s.cwd !== '/') await navigate(win, s, vfs.normalize(s.cwd, '..'));
         } else {
           s.selected = Math.max(0, s.selected - 1);
         }
@@ -159,19 +437,14 @@ export function createFinderApp({ vfs }) {
       if (e.key === 'Enter') {
         const it = s.items[s.selected];
         if (!it) return true;
-        if (it.type === 'dir') {
-          s.cwd = vfs.normalize(s.cwd, it.name);
-          s.selected = -1;
-          await refresh(win, s);
-        }
+        if (it.type === 'dir') await navigate(win, s, vfs.normalize(s.cwd, it.name));
+        else openViewer(win, s, it.name);
         return true;
       }
       return false;
     },
 
-    getCursor(lx, ly) {
-      return 'default';
-    },
+    getCursor(lx, ly) { return 'default'; },
   };
 }
 
@@ -291,7 +564,6 @@ export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
 
       if (e.key === 'Enter') {
         const line = s.input;
-        // 显示提示符 + 输入
         let cwd = s.shell.cwd;
         if (cwd.startsWith('/Users/guest')) cwd = '~' + cwd.slice('/Users/guest'.length);
         s.lines.push('guest@drapog:' + cwd + '$ ' + line);

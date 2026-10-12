@@ -2,7 +2,7 @@
  * @file        System/Boot/gui.js
  * @module      drapog/boot/gui
  * @summary     GUI 模式引导（高清 + 内嵌应用）
- * @version     0.3.0
+ * @version     0.4.0
  */
 
 import { WindowManager } from '../../drapog.wm.js';
@@ -12,6 +12,16 @@ import { VM } from '../../drapog.vm.js';
 import { DrapCC } from '../../drapcc.js';
 import { createFinderApp, createTerminalApp } from '../../drapog.apps.js';
 import { DrapSYS } from '../../drapog.sys.js';
+
+// 是否移动端（与 BIOS 菜单同一判据）
+function isMobileDevice() {
+  try {
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+  } catch (e) {}
+  const touch = (navigator.maxTouchPoints || 0) > 0;
+  const small = Math.min(window.innerWidth, window.innerHeight) < 820;
+  return touch && small;
+}
 
 const screen = document.getElementById('screen');
 
@@ -93,6 +103,14 @@ function launchDrapApp(wm, vfs, source) {
   return sys;
 }
 
+// 从 URL 拉取 DrapLang 源码并启动（dock 启动 drapp 用）
+function launchDrapAppUrl(wm, url, vfs) {
+  fetch(url)
+    .then(r => r.text())
+    .then(src => launchDrapApp(wm, vfs, src))
+    .catch(err => console.warn('drapp 加载失败（可忽略）', err));
+}
+
 export function startGUI(opts = {}) {
   return new Promise(resolve => {
     // DPR 高清
@@ -116,6 +134,14 @@ export function startGUI(opts = {}) {
     wm.registerApp('finder',   createFinderApp({ vfs }));
     wm.registerApp('terminal', createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }));
     wm.registerApp('__drapapp__', drapAppBridge);   // DrapLang GUI 应用的宿主桥接
+
+    // Paint：用 DrapLang 编写的调色板 drapp，从 dock 启动（自建 VM 窗口）
+    wm.registerApp('paint', {
+      launch: (wm2) => launchDrapAppUrl(wm2, new URL('../app_paint.drap', import.meta.url), vfs),
+    });
+
+    // 移动端（无实体键盘）默认打开软键盘，方便输入
+    if (isMobileDevice()) wm.softKeyboard.open = true;
 
     /* -------- 事件 -------- */
     let lastDown = { t: 0, x: 0, y: 0 };
