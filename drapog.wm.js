@@ -2,7 +2,7 @@
  * @file        drapog.wm.js
  * @module      drapog/wm
  * @summary     窗口管理器（支持应用内容）
- * @version     0.4.0
+ * @version     0.5.0
  */
 
 export class WindowManager {
@@ -27,6 +27,7 @@ export class WindowManager {
       { id: 'finder',   letter: 'F', title: 'Finder' },
       { id: 'terminal', letter: '>', title: 'Terminal' },
       { id: 'paint',    letter: '🎨', title: 'Paint' },
+      { id: 'appmgr',   letter: '◆', title: '应用' },
       { id: 'edit',     letter: 'T', title: 'TextEdit' },
       { id: 'settings', letter: '⚙', title: 'Settings' },
       { id: 'about',    letter: 'W', title: '关于本机' },

@@ -1,39 +1,33 @@
-// DrapApp 示例 —— 完全用 DrapLang 编写，只调用底层 win_* 工具自举出 GUI
-// 验证闭环：win_create → win_get_event（事件循环）→ win_fill_rect/win_text（绘制）→ 点击变色 → win_close
+// DrapApp 示例 —— 完全用 DrapLang 编写，基于 win_gui 控件框架自举 GUI
+// 验证闭环：win_create → win_get_event（事件循环）→ win_label/win_button（声明式控件）
+//          → 点击按钮('click <id>')切换主题色 → close 停机
+// 控件由宿主自动绘制与命中：drapp 只在 paint 分支声明，不手绘矩形。
 entry fn main() -> i32 {
     let win = syscall win_create("DrapApp 示例", 420, 320)
     let mode = 0
     while (true) {
         let e = syscall win_get_event()
-        if (e == "paint") {
-            // 背景随 mode 切换主题色
+        let t = split(e, " ")[0]
+        if (t == "paint") {
+            // 背景随 mode 切换主题色（自绘）
             if (mode == 0) { syscall win_set_color(28, 28, 34) }
             else if (mode == 1) { syscall win_set_color(42, 22, 46) }
             else { syscall win_set_color(20, 42, 32) }
             syscall win_fill_rect(0, 0, 420, 320)
-            // 蓝色按钮
-            syscall win_set_color(80, 160, 255)
-            syscall win_fill_rect(40, 60, 180, 56)
-            // 按钮文字
-            syscall win_set_color(255, 255, 255)
-            syscall win_set_font(20)
-            syscall win_text(60, 78, "点我变色")
-            // 说明文字
-            syscall win_set_color(150, 150, 160)
-            syscall win_set_font(13)
-            syscall win_text(40, 140, "DrapLang 自举 GUI")
-            syscall win_text(40, 164, "点击蓝块切换主题")
-            syscall win_text(40, 192, "mode = " + syscall itoa(mode))
-        } else if (split(e, " ")[0] == "click") {
-            let toks = split(e, " ")
-            let x = syscall win_atoi(toks[1])
-            let y = syscall win_atoi(toks[2])
-            if (x >= 40 && x <= 220 && y >= 60 && y <= 116) {
+            // 声明式控件：标题 + 按钮（宿主自动绘制与命中）
+            syscall win_label(40, 28, "DrapLang 控件框架示例")
+            syscall win_button("go", 40, 70, 160, 44)
+            syscall win_label(40, 130, "点击按钮切换主题色")
+            syscall win_label(40, 156, "mode = " + syscall itoa(mode))
+        } else if (t == "click") {
+            // 命中按钮时宿主注入 "click <id>"；空白处注入 "click x y"
+            let id = split(e, " ")[1]
+            if (id == "go") {
                 mode = mode + 1
                 if (mode > 2) { mode = 0 }
                 syscall win_invalidate(win)
             }
-        } else if (split(e, " ")[0] == "key") {
+        } else if (t == "key") {
             // 任意按键也切换一次主题，便于演示键盘事件
             mode = mode + 1
             if (mode > 2) { mode = 0 }

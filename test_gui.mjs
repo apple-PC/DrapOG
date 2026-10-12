@@ -49,24 +49,22 @@ assert(st.drawOps.length > 0, '首帧绘制指令非空（' + st.drawOps.length 
 const bg0 = st.drawOps.find(o => o.op === 'fill' && o.x === 0 && o.y === 0 && o.w === 420 && o.h === 320);
 assert(bg0 && bg0.color[0] === 28 && bg0.color[1] === 28 && bg0.color[2] === 34, '首帧背景色 = 深灰 [28,28,34]（mode=0）');
 
-const btn = st.drawOps.find(o => o.op === 'fill' && o.x === 40 && o.y === 60 && o.w === 180 && o.h === 56);
-assert(btn && btn.color[0] === 80 && btn.color[1] === 160 && btn.color[2] === 255, '蓝色按钮 [80,160,255] 已绘制');
+// 控件框架：按钮/标签以声明式 controls 存在，不进 drawOps
+assert(st.controls.some(c => c.type === 'button' && c.id === 'go'), '声明式按钮控件 "go" 已注册');
+assert(st.controls.some(c => c.type === 'label' && c.text === 'DrapLang 控件框架示例'), '标签控件已注册');
 
-const txt = st.drawOps.find(o => o.op === 'text' && o.text === '点我变色');
-assert(!!txt, '按钮文字 "点我变色" 已绘制');
-
-console.log('== 3. 注入 click（落在按钮区 100,80）→ mode 切到 1 ==');
-sys.injectWinEvent(1, 'click 100 80');
+console.log('== 3. 命中按钮（宿主注入 "click go"）→ mode 切到 1 ==');
+sys.injectWinEvent(1, 'click go');
 await tick();
 const after = sys.drapWins.get(1);
 const bg1 = after.drawOps.find(o => o.op === 'fill' && o.x === 0 && o.y === 0 && o.w === 420 && o.h === 320);
 assert(bg1 && bg1.color[0] === 42 && bg1.color[1] === 22 && bg1.color[2] === 46, '点击后背景色切换为 [42,22,46]（mode=1）');
 
-console.log('== 4. 注入 click（落在按钮区外 300,300）→ 不应切换 ==');
+console.log('== 4. 空白处点击（"click x y"）→ 不应切换 ==');
 sys.injectWinEvent(1, 'click 300 300');
 await tick();
 const bg1b = sys.drapWins.get(1).drawOps.find(o => o.op === 'fill' && o.x === 0 && o.y === 0 && o.w === 420 && o.h === 320);
-assert(bg1b && bg1b.color[0] === 42 && bg1b.color[1] === 22 && bg1b.color[2] === 46, '按钮外点击，主题不变（仍 mode=1）');
+assert(bg1b && bg1b.color[0] === 42 && bg1b.color[1] === 22 && bg1b.color[2] === 46, '空白点击，主题不变（仍 mode=1）');
 
 console.log('== 5. 注入 key → 再切到 mode=2 ==');
 sys.injectWinEvent(1, 'key a');

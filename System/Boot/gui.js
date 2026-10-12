@@ -2,7 +2,7 @@
  * @file        System/Boot/gui.js
  * @module      drapog/boot/gui
  * @summary     GUI 模式引导（高清 + 内嵌应用）
- * @version     0.4.0
+ * @version     0.5.0
  */
 
 import { WindowManager } from '../../drapog.wm.js';
@@ -10,7 +10,7 @@ import { VFS } from '../../drapog.vfs.js';
 import { DrapShell } from '../../drapog.shell.js';
 import { VM } from '../../drapog.vm.js';
 import { DrapCC } from '../../drapcc.js';
-import { createFinderApp, createTerminalApp } from '../../drapog.apps.js';
+import { createFinderApp, createTerminalApp, createAppManagerApp } from '../../drapog.apps.js';
 import { DrapSYS } from '../../drapog.sys.js';
 
 // 是否移动端（与 BIOS 菜单同一判据）
@@ -47,6 +47,7 @@ const drapAppBridge = {
     const st = sys.drapWins.get(win.id);
     if (!st) return;
     if (st.title) win.title = st.title;   // DrapLang 改了标题则同步
+    // 1) drapp 自绘（背景 / 图形 / 文字）
     for (const op of st.drawOps) {
       if (op.op === 'text') {
         ctx.fillStyle = _rgb(op.color);
@@ -63,14 +64,70 @@ const drapAppBridge = {
         ctx.strokeRect(op.x, op.y, op.w, op.h);
       }
     }
+    // 2) 声明式控件（标准样式，宿主自动绘制）
+    for (const c of st.controls) {
+      if (c.type === 'button') {
+        ctx.fillStyle = 'rgba(10,132,255,0.95)';
+        wm.roundRect(c.x, c.y, c.w, c.h, 6); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(c.id, c.x + c.w / 2, c.y + c.h / 2);
+      } else if (c.type === 'label') {
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+        ctx.fillText(c.text, c.x, c.y);
+      } else if (c.type === 'input') {
+        const focused = win.__focusId === c.id;
+        ctx.fillStyle = focused ? '#1c1c22' : '#15151a';
+        wm.roundRect(c.x, c.y, c.w, c.h, 5); ctx.fill();
+        ctx.strokeStyle = focused ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        wm.roundRect(c.x, c.y, c.w, c.h, 5); ctx.stroke();
+        const val = st.inputs.get(c.id) || '';
+        ctx.fillStyle = val ? '#fff' : 'rgba(255,255,255,0.4)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(val || '输入...', c.x + 6, c.y + c.h / 2);
+        if (focused && val) {
+          const tw = ctx.measureText(val).width;
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(c.x + 6 + tw, c.y + 4, 1.5, c.h - 8);
+        }
+      }
+    }
   },
   onMouseDown(lx, ly, win, wm) {
     const sys = win.__sys;
-    if (sys) sys.injectWinEvent(win.id, 'click ' + Math.round(lx) + ' ' + Math.round(ly));
+    if (!sys) return;
+    const hit = sys.hitControl(win.id, Math.round(lx), Math.round(ly));
+    if (hit && hit.type === 'button') {
+      sys.injectWinEvent(win.id, 'click ' + hit.id);
+    } else if (hit && hit.type === 'input') {
+      win.__focusId = hit.id;
+      sys.injectWinEvent(win.id, 'click ' + hit.id);   // 通知 drapp 聚焦
+    } else {
+      win.__focusId = null;
+      sys.injectWinEvent(win.id, 'click ' + Math.round(lx) + ' ' + Math.round(ly));
+    }
   },
   onKeyDown(e, win, wm) {
     const sys = win.__sys;
-    if (sys) sys.injectWinEvent(win.id, 'key ' + e.key);
+    if (!sys) return true;
+    const focusId = win.__focusId;
+    if (focusId) {
+      const st = sys.drapWins.get(win.id);
+      let val = st.inputs.get(focusId) || '';
+      if (e.key === 'Backspace') val = val.slice(0, -1);
+      else if (e.key === 'Enter') { /* 保持值，drapp 自行读取 */ }
+      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) val += e.key;
+      else return true;   // 方向键等忽略
+      sys.setInputValue(win.id, focusId, val);
+      sys.injectWinEvent(win.id, 'input ' + focusId + ' ' + val);
+      return true;
+    }
+    sys.injectWinEvent(win.id, 'key ' + e.key);
     return true;
   },
 };
@@ -139,6 +196,8 @@ export function startGUI(opts = {}) {
     wm.registerApp('paint', {
       launch: (wm2) => launchDrapAppUrl(wm2, new URL('../app_paint.drap', import.meta.url), vfs),
     });
+    // 应用管理助手：host 侧应用，网格列出可用应用并启动
+    wm.registerApp('appmgr', createAppManagerApp({ vfs, launchDrapAppUrl }));
 
     // 移动端（无实体键盘）默认打开软键盘，方便输入
     if (isMobileDevice()) wm.softKeyboard.open = true;

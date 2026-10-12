@@ -92,6 +92,12 @@
 - 自动挂载（刷新后恢复文件夹句柄）
 - GUI 系统调用层（win_create / win_close / win_set_title / win_focus / win_text / win_fill_rect / win_stroke_rect / win_set_color / win_set_font / win_get_event / win_invalidate / win_atoi / itoa）—— DrapLang 经此自举出窗口 / 绘制 / 输入
 - GUI 自举：System/app_gui.drap 是第一个完全用 DrapLang 编写的 GUI 应用（事件循环 + 点击变色主题），由 System/Boot/gui.js 的 launchDrapApp 宿主桥接驱动（建真实 WM 窗口、重放 drawOps、注入鼠标/键盘事件），test_gui.mjs 6 项断言全绿
+- win_gui 控件框架（win_button / win_label / win_input / win_w / win_h / win_input_get）—— drapp 声明式控件，宿主自动布局/绘制/命中；test_gui.mjs 改用控件命中模型全绿
+- 应用管理助手：drapog.apps.js 的 createAppManagerApp + dock 📦，网格列出 Finder/Terminal/Paint/DrapApp 示例并启动
+- 设备感知默认启动：触屏设备（matchMedia('(pointer: coarse)')）默认进 GUI，桌面默认进 CMD；BIOS 菜单显示「自动进入：xxx」并加启动错误兜底
+- 移动端软键盘：WM 软键盘 overlay + 菜单栏键盘按钮，焦点在 drapp 输入框时输入经宿主注入
+- Finder 增强：上一级按钮、顶部菜单、新建 txt/文件夹、系统目录进入需权限（双击拦截 + 允许后放行）、系统目录内禁止删除
+- DrapLang 完善：结构体成员赋值（p.x = 5 / p.x += 2）、数组元素赋值（a[i] = v）、复合赋值 += -= *= /= 真正可用（tokenizer 补齐复合赋值符）；test_draplang.mjs 覆盖 struct/member/array/split/短路/continue/嵌套 while 全绿
 
 未完成：
 - DrapLang 事件处理程序（event fn）
@@ -208,7 +214,9 @@ DrapLang 源码 (.drap)
 - entry fn main() -> i32 { ... }
 - let x = expr
 - let x: T = expr
-- x = expr / x += expr / x -= expr / x *= expr / x /= expr
+- x = expr / x += expr / x -= expr / x *= expr / x /= expr（左值支持 ident / .成员 / [下标]）
+- 结构体成员赋值：p.x = expr / p.x += expr
+- 数组元素赋值：a[i] = expr
 - if (cond) { ... } else { ... }
 - while (cond) { ... }
 - return expr
@@ -473,6 +481,14 @@ syscall 返回类型由编译器根据名字给出（SYS_RET 表）。
   0x4a  win_atoi(str)                  → i32（事件坐标解析）
   0x4c  itoa(n)                        → str（整数转字符串，便于 GUI/终端显示数字）
 
+GUI 控件框架（0x4d-0x53，win_gui 声明式控件；**0x50 仍是 time_now，控件占用 0x4d/0x4e/0x4f/0x51/0x52/0x53**）：
+  0x4d  win_w()                       → i32（当前窗口宽度，drapp 自适应布局，替代硬编码宽高）
+  0x4e  win_h()                       → i32（当前窗口高度）
+  0x4f  win_button(id, x, y, w, h)    → i32（声明按钮，**5 参数**：id(str) 同时作显示文字，命中事件 'click <id>'）
+  0x51  win_label(x, y, str)          → i32（声明静态标签，**3 参数**，不可交互）
+  0x52  win_input_get(id)             → str（读取输入框当前值）
+  0x53  win_input(id, x, y, w, h)     → i32（声明输入框，**5 参数**，值由宿主键盘/软键盘维护，跨帧保留）
+
 ### 错误处理
 
 syscall 失败返回 0，不抛异常。
@@ -571,6 +587,36 @@ JS 宿主端（System/Boot/gui.js）：
 
 验证：test_gui.mjs（mock 宿主，winId=1）断言首帧绘制、点击命中切换主题色、点击落空不切换、按键切换、close 正常停机，6 项全绿。
 
+### win_gui 控件框架（声明式控件）
+
+与「手绘矩形 + 手算坐标命中」相对，控件框架让 drapp 只在 paint 分支声明控件，宿主自动布局、绘制与命中：
+
+DrapLang 端（paint 分支里声明）：
+  win_button("go", x, y, w, h)      // 声明按钮；id 即显示文字；命中 → 注入 'click go'
+  win_label(x, y, "文本")            // 声明静态标签（不可交互）
+  win_input("name", x, y, w, h)      // 声明输入框；值由宿主键盘/软键盘维护，跨帧保留
+  let v = win_input_get("name")      // 读取输入框当前值（str）
+  let W = win_w(); let H = win_h()   // 自适应窗口尺寸
+
+JS 宿主端（System/Boot/gui.js 的 drapAppBridge）：
+  - render：重放 drawOps 后，按 controls 标准样式绘制按钮（圆角 + 悬停态）/ 标签 / 输入框
+  - onMouseDown(lx, ly, win)：hitControl 命中控件 → 注入 'click <id>'；命中空白 → 注入 'click x y'
+  - onKeyDown(e, win)：焦点在输入框 → 更新 inputs[id] 并注入 'input <id> <val>'；否则注入 'key <k>'
+
+drapp 事件循环只判断 split(e," ")[0]：
+  - == "click" 且 [1] 是控件 id → 命中；== 坐标数字 → 空白点击
+  - == "input" → 输入框内容变化（[1]=id，[2]=值）
+
+验证：test_gui.mjs 改用控件命中模型（首帧声明 win_button("go")，注入 'click go' 切主题），6 项断言全绿。
+
+### 应用管理助手（App Manager）
+
+drapog.apps.js 的 createAppManagerApp({ vfs, launchDrapAppUrl }) 是一个宿主应用，以网格列出可用 app：
+  - Finder（host）、Terminal（host）、Paint（drapp: app_paint.drap）、DrapApp 示例（drapp: app_gui.drap）
+点击单元格 → host 类调 wm.launchApp({ id, letter, title })；drapp 类经 launchDrapAppUrl 编译运行对应 .drap。
+
+注册：drapog.wm.js 的 dock 增加 { id:'appmgr', letter:'📦', title:'应用' }；BIOS 启动后 wm.registerApp('appmgr', createAppManagerApp({ vfs, launchDrapAppUrl }))。
+
 ## 十五、B.1-B.5 完成情况
 
 B.1 SYSCALL 指令 + async run        ✅
@@ -606,4 +652,18 @@ test_gui.mjs 6 项断言                       ✅ 全绿
     导致 click/key 事件切分后的首 token 非 "click"/"key"；现编译器对 STR 型 delim 拆出首字符码点。
 ---
 
-最后更新：2026-10-12　当前版本：0.6.0
+## 十六、win_gui 控件框架 + 应用管理助手 完成情况（0.7.0）
+
+win_gui 控件框架（声明式按钮/标签/输入框）          ✅（drapog.sys.js 0.5.0 + drapcc.js 0.7.0）
+5 参数 syscall 走 r7（win_button / win_input）       ✅（drapcc.js genSyscall n>=5 → r7）
+宿主自动布局/绘制/命中（drapAppBridge）              ✅（System/Boot/gui.js 0.5.0）
+drapp 输入框焦点 + 软键盘注入（'input <id> <val>'）  ✅
+应用管理助手 createAppManagerApp + dock 📦           ✅（drapog.apps.js 0.5.0 + drapog.wm.js 0.5.0）
+设备感知默认启动 + 启动错误兜底                       ✅（System/BIOS/menu.js 0.2.0）
+移动端软键盘 overlay + 菜单栏键盘按钮                ✅（drapog.wm.js 0.5.0）
+Finder 增强（上级/新建/系统权限/预览）               ✅（commit 5c167c9）
+DrapLang struct 成员赋值 / 数组元素赋值 / 复合赋值    ✅（drapcc.js 0.7.0；tokenizer 补齐 += -= *= /=）
+test_draplang.mjs 17 项 / test_gui 6 项 / 全回归     ✅ 全绿
+
+---
+最后更新：2026-10-12　当前版本：0.7.0

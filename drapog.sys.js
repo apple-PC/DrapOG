@@ -2,7 +2,7 @@
  * @file        drapog.sys.js
  * @module      drapog/sys
  * @summary     DrapSYS 系统调用分发器
- * @version     0.4.0
+ * @version     0.5.0
  */
 
 export class DrapSYS {
@@ -62,6 +62,12 @@ export class DrapSYS {
       0x49: this.win_invalidate.bind(this),
       0x4a: this.win_atoi.bind(this),
       0x4c: this.itoa.bind(this),
+      0x4d: this.win_w.bind(this),
+      0x4e: this.win_h.bind(this),
+      0x4f: this.win_button.bind(this),
+      0x51: this.win_label.bind(this),
+      0x52: this.win_input_get.bind(this),
+      0x53: this.win_input.bind(this),
     };
   }
 
@@ -204,8 +210,10 @@ export class DrapSYS {
       queue: [],
       resolver: null,
       drawOps: [],
+      controls: [],        // 声明式控件：每帧 paint 时重置，由 drapp 填充
+      inputs: new Map(),   // 输入框持久值：id -> string（跨帧保留用户输入）
       style: { color: [255, 255, 255], font: 14 },
-      title,
+      title, w, h,
       dirty: true,
     });
     this.curWinId = id;
@@ -273,13 +281,13 @@ export class DrapSYS {
     if (!st) return this.vm.pushStr('');
     if (st.queue.length > 0) {
       const ev = st.queue.shift();
-      if (ev === 'paint') st.drawOps = [];
+      if (ev === 'paint') { st.drawOps = []; st.controls = []; }
       return this.vm.pushStr(ev);
     }
     return new Promise(resolve => {
       st.resolver = (ev) => {
         st.resolver = null;
-        if (ev === 'paint') st.drawOps = [];
+        if (ev === 'paint') { st.drawOps = []; st.controls = []; }
         resolve(this.vm.pushStr(ev));
       };
     });
@@ -289,6 +297,64 @@ export class DrapSYS {
   win_invalidate(winId) {
     this._pushEvent(winId, 'paint');
     return 0;
+  }
+
+  /* ---------- GUI 控件框架（win_gui）：声明式控件 ----------
+     drapp 在 paint 分支里调用 win_button/win_label/win_input 声明控件；
+     宿主（drapAppBridge）自动布局、绘制与命中，并把命中事件以
+     'click <id>' / 'input <id> <val>' 注入，drapp 不再手绘矩形、不手算坐标。
+  ------------------------------------------------------------ */
+
+  // 窗口尺寸（drapp 自适应布局，替代硬编码宽高）
+  win_w() { const st = this._cur(); return st ? st.w : 0; }
+  win_h() { const st = this._cur(); return st ? st.h : 0; }
+
+  // 声明一个按钮：id 同时作为显示文字（命中事件为 'click <id>'）
+  win_button(idPtr, x, y, w, h) {
+    const st = this._cur(); if (!st) return 0;
+    st.controls.push({ id: this.vm.readStr(idPtr), type: 'button', x, y, w, h });
+    return 0;
+  }
+
+  // 声明一个静态标签（不可交互）
+  win_label(x, y, textPtr) {
+    const st = this._cur(); if (!st) return 0;
+    st.controls.push({ type: 'label', x, y, text: this.vm.readStr(textPtr) });
+    return 0;
+  }
+
+  // 声明一个输入框：id 标识；值由宿主键盘/软键盘维护（跨帧保留）
+  win_input(idPtr, x, y, w, h) {
+    const st = this._cur(); if (!st) return 0;
+    const id = this.vm.readStr(idPtr);
+    if (!st.inputs.has(id)) st.inputs.set(id, '');
+    st.controls.push({ id, type: 'input', x, y, w, h });
+    return 0;
+  }
+
+  // 读取输入框当前值（str）
+  win_input_get(idPtr) {
+    const st = this._cur(); if (!st) return 0;
+    const id = this.vm.readStr(idPtr);
+    return this.vm.pushStr(st.inputs.get(id) || '');
+  }
+
+  // 宿主桥接：命中测试控件（返回控件对象或 null）
+  hitControl(winId, x, y) {
+    const st = this.drapWins.get(winId);
+    if (!st) return null;
+    for (let i = st.controls.length - 1; i >= 0; i--) {
+      const c = st.controls[i];
+      if (!c.id) continue;                 // label 无交互
+      if (x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h) return c;
+    }
+    return null;
+  }
+
+  // 宿主桥接：写入输入框当前值（宿主在键盘事件中调用）
+  setInputValue(winId, id, val) {
+    const st = this.drapWins.get(winId);
+    if (st) st.inputs.set(id, val);
   }
 
   // 字符串 → 整数（GUI 事件坐标解析）

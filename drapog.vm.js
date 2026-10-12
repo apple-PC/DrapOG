@@ -132,8 +132,8 @@ export class VM {
   async _doSyscall(ins) {
     if (!this.sys) throw new Error('VM: 未挂载系统调用层（DrapSYS）');
     const num = parseInt(ins.args[0], 10);
-    // SYSCALL 传参约定：r1..r3 + r6（r4 为帧指针 FP、r5 为栈指针 SP、r7 为编译器临时寄存器，全部避开）
-    const args = [this.regs[1], this.regs[2], this.regs[3], this.regs[6]];
+    // SYSCALL 传参约定：r1..r3 + r6 + r7（第 5 参数走 r7；r4=FP / r5=SP 全程避开）
+    const args = [this.regs[1], this.regs[2], this.regs[3], this.regs[6], this.regs[7]];
     const r = await this.sys.dispatch(num, args);
     this.regs[0] = typeof r === 'number' ? r : 0;
     this.steps = 0;   // P0-4：每次系统调用（yield 点）重置步数预算，长驻交互程序（B7 Shell）永不撞线

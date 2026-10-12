@@ -2,7 +2,7 @@
  * @file        drapog.apps.js
  * @module      drapog/apps
  * @summary     内置 GUI 应用（Finder / Terminal）
- * @version     0.4.0
+ * @version     0.5.0
  */
 
 import { makeLineWriter } from './drapog.stream.js';
@@ -629,5 +629,79 @@ export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
     },
 
     getCursor() { return 'text'; },
+  };
+}
+
+/* ============================================================
+   App Manager —— drapp 应用管理助手（host 侧）
+   网格列出可用应用（内置 host 应用 + DrapLang drapp），点击启动
+   ============================================================ */
+export function createAppManagerApp({ vfs, launchDrapAppUrl }) {
+  const APPS = [
+    { name: 'Finder',       icon: '📁', kind: 'host',  appId: 'finder' },
+    { name: 'Terminal',     icon: '>',  kind: 'host',  appId: 'terminal' },
+    { name: 'Paint',        icon: '🎨', kind: 'drapp', file: 'app_paint.drap' },
+    { name: 'DrapApp 示例', icon: '◆',  kind: 'drapp', file: 'app_gui.drap' },
+  ];
+
+  const CELL = 96, GAP = 16, PAD = 16, TOP = 40;
+
+  function cellRects(win) {
+    const cols = Math.max(1, Math.floor((win.w - PAD * 2 + GAP) / (CELL + GAP)));
+    return APPS.map((a, i) => {
+      const c = i % cols, r = Math.floor(i / cols);
+      const x = PAD + c * (CELL + GAP);
+      const y = PAD + TOP + r * (CELL + GAP);
+      return { a, x, y, w: CELL, h: CELL };
+    });
+  }
+
+  function launch(a, wm) {
+    if (a.kind === 'host') {
+      wm.launchApp({ id: a.appId, letter: (a.icon.length === 1 ? a.icon : a.name[0]), title: a.name });
+    } else {
+      const url = new URL(a.file, import.meta.url);
+      launchDrapAppUrl(wm, url, vfs);
+    }
+  }
+
+  return {
+    create() {},
+
+    render(ctx, win, wm) {
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#1e1e24';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = '600 15px -apple-system, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('应用', PAD, 12);
+
+      for (const c of cellRects(win)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        wm.roundRect(c.x, c.y, c.w, c.h, 12); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+        wm.roundRect(c.x, c.y, c.w, c.h, 12); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = '28px -apple-system, "Apple Color Emoji", sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(c.a.icon, c.x + c.w / 2, c.y + c.h / 2 - 10);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '12px -apple-system, sans-serif';
+        ctx.fillText(c.a.name, c.x + c.w / 2, c.y + c.h - 18);
+      }
+    },
+
+    onMouseDown(lx, ly, win, wm) {
+      for (const c of cellRects(win)) {
+        if (lx >= c.x && lx <= c.x + c.w && ly >= c.y && ly <= c.y + c.h) {
+          launch(c.a, wm);
+          return;
+        }
+      }
+    },
+
+    getCursor() { return 'pointer'; },
   };
 }

@@ -2,7 +2,7 @@
  * @file        drapcc.js
  * @module      drapog/drapcc
  * @summary     DrapLang 编译器（支持 syscall）
- * @version     0.6.0
+ * @version     0.7.0
  */
 
 /* ==================== 系统调用表 ==================== */
@@ -37,6 +37,13 @@ const SYS_TABLE = {
   'win_invalidate': 0x49,
   'win_atoi':       0x4a,
   'itoa':           0x4c,
+  // GUI 控件框架（win_gui）：声明式按钮 / 标签 / 输入框，宿主自动布局与命中
+  'win_w':          0x4d,
+  'win_h':          0x4e,
+  'win_button':     0x4f,
+  'win_label':      0x51,
+  'win_input_get':  0x52,
+  'win_input':      0x53,
 };
 
 const SYS_RET = {
@@ -69,6 +76,12 @@ const SYS_RET = {
   'win_invalidate': { kind: 'prim', name: 'i32' },
   'win_atoi':       { kind: 'prim', name: 'i32' },
   'itoa':           { kind: 'prim', name: 'str' },
+  'win_w':          { kind: 'prim', name: 'i32' },
+  'win_h':          { kind: 'prim', name: 'i32' },
+  'win_button':     { kind: 'prim', name: 'i32' },
+  'win_label':      { kind: 'prim', name: 'i32' },
+  'win_input_get':  { kind: 'prim', name: 'str' },
+  'win_input':      { kind: 'prim', name: 'i32' },
 };
 
 const SYS_ARGS = {
@@ -101,6 +114,12 @@ const SYS_ARGS = {
   'win_invalidate': 1,
   'win_atoi':       1,
   'itoa':           1,
+  'win_w':          0,
+  'win_h':          0,
+  'win_button':     5,
+  'win_label':      3,
+  'win_input_get':  1,
+  'win_input':      5,
 };
 
 class Scope {
@@ -206,7 +225,7 @@ export class DrapCC {
         i = j; continue;
       }
       const two = src.substr(i, 2);
-      if (['==','!=','<=','>=','&&','||','->'].includes(two)) {
+      if (['==','!=','<=','>=','&&','||','->','+=','-=','*=','/='].includes(two)) {
         tokens.push({ type: 'OP', value: two }); i += 2; continue;
       }
       if ('(){}[]=+-*/%<>!;:,.&|^'.includes(c)) {
@@ -319,10 +338,21 @@ export class DrapCC {
       if (t.value === 'break') { this.next(); this.accept(';'); return { kind: 'break' }; }
       if (t.value === 'continue') { this.next(); this.accept(';'); return { kind: 'continue' }; }
       if (t.value === 'term_print' || t.value === 'term_println') return this.parsePrint();
-      const nx = this.peek(1);
-      if (nx && nx.type === 'OP' && ['=', '+=', '-=', '*=', '/='].includes(nx.value)) {
-        return this.parseAssign();
+      // 赋值语句：左值可能是 ident / member(.) / index([])
+      const savedPos = this.pos;
+      let assignTarget = null;
+      let isAssign = false;
+      try {
+        assignTarget = this.parseAssignTarget();
+        isAssign = this.isAssignOp();
+      } catch (e) { isAssign = false; }
+      if (isAssign) {
+        return this.parseAssignRhs(assignTarget);
       }
+      this.pos = savedPos;
+      const expr = this.parseExpr();
+      this.accept(';');
+      return { kind: 'exprstmt', expr };
     }
 
     const expr = this.parseExpr();
@@ -341,12 +371,33 @@ export class DrapCC {
     return { kind: 'let', name, type, init };
   }
 
-  parseAssign() {
-    const name = this.next().value;
+  parseAssignTarget() {
+    let e = this.parsePrimary();
+    while (true) {
+      if (this.is('.')) {
+        this.next();
+        const name = this.next().value;
+        e = { kind: 'member', obj: e, name };
+      } else if (this.is('[')) {
+        this.next();
+        const idx = this.parseExpr();
+        this.expect(']');
+        e = { kind: 'index', obj: e, index: idx };
+      } else break;
+    }
+    return e;
+  }
+
+  isAssignOp() {
+    const t = this.peek();
+    return t.type === 'OP' && ['=', '+=', '-=', '*=', '/='].includes(t.value);
+  }
+
+  parseAssignRhs(target) {
     const op = this.next().value;
     const value = this.parseExpr();
     this.accept(';');
-    return { kind: 'assign', name, op, value };
+    return { kind: 'assign', target, op, value };
   }
 
   parseIf() {
@@ -641,18 +692,68 @@ export class DrapCC {
   }
 
   genAssign(s) {
-    const v = this.curScope.lookup(s.name);
-    if (!v) throw new Error('未定义变量: ' + s.name);
-    this.genExpr(s.value);
-    if (s.op === '=') {
-      this.emit('STOREL', [String(v.offset), 'r0']);
-    } else {
-      this.emit('LOADL', [String(v.offset), 'r1']);
-      const m = { '+=': 'ADD', '-=': 'SUB', '*=': 'MUL', '/=': 'DIV' };
-      this.emit(m[s.op], ['r2', 'r1', 'r0']);
-      this.emit('STOREL', [String(v.offset), 'r2']);
-      this.emit('MOV', ['r0', 'r2']);
+    const tgt = s.target;
+    this.genExpr(s.value);           // r0 = 右值
+
+    if (tgt.kind === 'ident') {
+      const v = this.curScope.lookup(tgt.name);
+      if (!v) throw new Error('未定义变量: ' + tgt.name);
+      if (s.op === '=') {
+        this.emit('STOREL', [String(v.offset), 'r0']);
+      } else {
+        this.emit('LOADL', [String(v.offset), 'r1']);   // r1 = 旧值
+        const m = { '+=': 'ADD', '-=': 'SUB', '*=': 'MUL', '/=': 'DIV' };
+        this.emit(m[s.op], ['r2', 'r1', 'r0']);          // r2 = 旧 OP 新
+        this.emit('STOREL', [String(v.offset), 'r2']);
+      }
+      return;
     }
+
+    if (tgt.kind === 'member') {
+      this.emit('PUSH', ['r0']);                 // 暂存右值
+      this.genExpr(tgt.obj);                      // r0 = 对象指针
+      this.emit('MOV', ['r7', 'r0']);             // r7 = 对象指针
+      this.emit('POP', ['r0']);                   // r0 = 右值
+      const objType = this.inferType(tgt.obj);
+      let fieldIdx = -1;
+      if (objType && objType.kind === 'struct') {
+        const sd = this.structs.get(objType.name);
+        if (sd) fieldIdx = sd.fields.findIndex(f => f.name === tgt.name);
+      }
+      if (fieldIdx < 0) throw new Error('未知字段: ' + tgt.name);
+      if (s.op === '=') {
+        this.emit('FLDSET', ['r7', String(fieldIdx), 'r0']);
+      } else {
+        this.emit('FLDGET', ['r7', String(fieldIdx), 'r1']);   // r1 = 旧值
+        const m = { '+=': 'ADD', '-=': 'SUB', '*=': 'MUL', '/=': 'DIV' };
+        this.emit(m[s.op], ['r2', 'r1', 'r0']);                // r2 = 旧 OP 新
+        this.emit('FLDSET', ['r7', String(fieldIdx), 'r2']);
+      }
+      return;
+    }
+
+    if (tgt.kind === 'index') {
+      const objT = this.inferType(tgt.obj);
+      if (this.isStrType(objT)) throw new Error('字符串不可被赋值');
+      this.emit('PUSH', ['r0']);                 // 暂存右值
+      this.genExpr(tgt.obj);                      // r0 = 数组指针
+      this.emit('PUSH', ['r0']);                  // 暂存数组指针
+      this.genExpr(tgt.index);                     // r0 = 下标
+      this.emit('MOV', ['r1', 'r0']);              // r1 = 下标
+      this.emit('POP', ['r7']);                    // r7 = 数组指针
+      this.emit('POP', ['r0']);                    // r0 = 右值
+      if (s.op === '=') {
+        this.emit('ARRSET', ['r7', 'r1', 'r0']);
+      } else {
+        this.emit('ARRGET', ['r7', 'r1', 'r2']);   // r2 = 旧值
+        const m = { '+=': 'ADD', '-=': 'SUB', '*=': 'MUL', '/=': 'DIV' };
+        this.emit(m[s.op], ['r3', 'r2', 'r0']);    // r3 = 旧 OP 新
+        this.emit('ARRSET', ['r7', 'r1', 'r3']);
+      }
+      return;
+    }
+
+    throw new Error('非法的赋值目标');
   }
 
   genIf(s) {
@@ -769,6 +870,10 @@ export class DrapCC {
     if (n >= 4) {
       this.emit('POP', ['r0']);
       this.emit('MOV', ['r6', 'r0']);
+    }
+    if (n >= 5) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r7', 'r0']);
     }
     this.emit('SYSCALL', [String(num)]);
   }
