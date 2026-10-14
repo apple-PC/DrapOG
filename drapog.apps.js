@@ -1,8 +1,8 @@
 /**
  * @file        drapog.apps.js
  * @module      drapog/apps
- * @summary     内置 GUI 应用（Finder / Terminal）
- * @version     0.5.0
+ * @summary     内置 GUI 应用（Finder / Terminal / TextEdit / Settings / About / AppMgr）
+ * @version     1.0.0
  */
 
 import { makeLineWriter } from './drapog.stream.js';
@@ -451,7 +451,7 @@ export function createFinderApp({ vfs }) {
 /* ============================================================
    Terminal —— 内嵌终端
    ============================================================ */
-export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
+export function createTerminalApp({ vfs, DrapShell, registry }) {
   const states = new Map();
   const FONT = '14px Consolas, "Courier New", monospace';
   const LH = 20;
@@ -475,6 +475,8 @@ export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
       };
       s.shell = new DrapShell({
         vfs,
+        registry,
+        wm,
         print: push,
         clear: () => { s.lines = []; s.scrollTop = 0; },
         exit: () => { if (wm) wm.closeWindow(win.id); },
@@ -633,36 +635,24 @@ export function createTerminalApp({ vfs, DrapShell, VM, DrapCC, DrapSYS }) {
 }
 
 /* ============================================================
-   App Manager —— drapp 应用管理助手（host 侧）
-   网格列出可用应用（内置 host 应用 + DrapLang drapp），点击启动
+   App Manager —— 应用管理助手（host 侧）
+   从注册表 registry 读取所有应用（内建 host + DrapLang drapp）网格展示，点击启动
    ============================================================ */
-export function createAppManagerApp({ vfs, launchDrapAppUrl }) {
-  const APPS = [
-    { name: 'Finder',       icon: '📁', kind: 'host',  appId: 'finder' },
-    { name: 'Terminal',     icon: '>',  kind: 'host',  appId: 'terminal' },
-    { name: 'Paint',        icon: '🎨', kind: 'drapp', file: 'app_paint.drap' },
-    { name: 'DrapApp 示例', icon: '◆',  kind: 'drapp', file: 'app_gui.drap' },
-  ];
-
+export function createAppManagerApp({ registry, vfs }) {
   const CELL = 96, GAP = 16, PAD = 16, TOP = 40;
 
+  // 注册表里除自身外所有应用
+  function apps() { return registry.all().filter(a => a.id !== 'appmgr'); }
+
   function cellRects(win) {
+    const list = apps();
     const cols = Math.max(1, Math.floor((win.w - PAD * 2 + GAP) / (CELL + GAP)));
-    return APPS.map((a, i) => {
+    return list.map((a, i) => {
       const c = i % cols, r = Math.floor(i / cols);
       const x = PAD + c * (CELL + GAP);
       const y = PAD + TOP + r * (CELL + GAP);
       return { a, x, y, w: CELL, h: CELL };
     });
-  }
-
-  function launch(a, wm) {
-    if (a.kind === 'host') {
-      wm.launchApp({ id: a.appId, letter: (a.icon.length === 1 ? a.icon : a.name[0]), title: a.name });
-    } else {
-      const url = new URL(a.file, import.meta.url);
-      launchDrapAppUrl(wm, url, vfs);
-    }
   }
 
   return {
@@ -696,7 +686,7 @@ export function createAppManagerApp({ vfs, launchDrapAppUrl }) {
     onMouseDown(lx, ly, win, wm) {
       for (const c of cellRects(win)) {
         if (lx >= c.x && lx <= c.x + c.w && ly >= c.y && ly <= c.y + c.h) {
-          launch(c.a, wm);
+          registry.launch(c.a.id, { wm, vfs });
           return;
         }
       }
@@ -704,4 +694,208 @@ export function createAppManagerApp({ vfs, launchDrapAppUrl }) {
 
     getCursor() { return 'pointer'; },
   };
+}
+
+/* ============================================================
+   About —— 关于本机
+   ============================================================ */
+export function createAboutApp() {
+  const LINES = [
+    '◆ DrapOG',
+    '',
+    '版本：自举原型（DrapLang 自举操作系统）',
+    '架构：DrapLang → DrapCC → 指令数组 → pack → .dbyte → DrapVM',
+    '',
+    '自举层次：',
+    '  L1 运行基座（浏览器 / Canvas / VFS）',
+    '  L2 语言·工具（DrapCC / DrapVM / DBYTE）',
+    '  L3 命令层（CMD / Shell）',
+    '  L4 应用注册表（.app 格式 / launcher）',
+    '  L5 图形界面（WM / Dock / AppMgr）',
+    '',
+    '由 DrapLang 自举的操作系统内核原型。',
+  ];
+  return {
+    create() {},
+    render(ctx, win) {
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#1e1e24'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = '13px -apple-system, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      let y = 16;
+      for (const l of LINES) { ctx.fillText(l, 16, y); y += 22; }
+    },
+    getCursor() { return 'default'; },
+  };
+}
+
+/* ============================================================
+   Settings —— 设置（移动端软键盘开关）
+   ============================================================ */
+export function createSettingsApp() {
+  return {
+    create() {},
+    render(ctx, win, wm) {
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#1e1e24'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)';
+      ctx.font = '600 15px -apple-system, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('设置', 16, 12);
+      // 移动端软键盘开关
+      const on = wm.softKeyboard.open;
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = '13px -apple-system, sans-serif';
+      ctx.fillText('移动端软键盘：', 16, 52);
+      ctx.fillStyle = on ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.2)';
+      wm.roundRect(150, 48, 52, 26, 13); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(on ? 174 : 160, 61, 10, 0, Math.PI * 2); ctx.fill();
+    },
+    onMouseDown(lx, ly, win, wm) {
+      if (lx >= 150 && lx <= 202 && ly >= 48 && ly <= 74) {
+        wm.softKeyboard.open = !wm.softKeyboard.open;
+      }
+    },
+    getCursor() { return 'pointer'; },
+  };
+}
+
+/* ============================================================
+   TextEdit —— 简易文本编辑器
+   自动加载 /Users/guest/Documents/readme.txt，可编辑并保存；
+   工具栏：新建 / 打开(readme) / 保存；光标固定在文末，支持回车换行与退格
+   ============================================================ */
+export function createEditApp({ vfs }) {
+  const states = new Map();
+  const TOOL_H = 34, STATUS_H = 20;
+
+  function getState(win) {
+    let s = states.get(win.id);
+    if (!s) {
+      s = { path: '/Users/guest/Documents/readme.txt', text: '', cursor: 0, scroll: 0, status: '' };
+      states.set(win.id, s);
+      vfs.read(s.path).then(c => {
+        s.text = (c == null ? '' : String(c));
+        s.cursor = s.text.length;
+        s.status = '';
+      }).catch(() => { s.status = '读取失败'; });
+    }
+    return s;
+  }
+
+  const TOOLBUTTONS = [
+    { id: 'new',   icon: '📄', tip: '新建' },
+    { id: 'open',  icon: '📂', tip: '打开' },
+    { id: 'save',  icon: '💾', tip: '保存' },
+  ];
+  function toolRects(win) {
+    const x0 = 8, y = 2, w = 32, h = 28, gap = 4;
+    return TOOLBUTTONS.map((b, i) => ({ ...b, x: x0 + i * (w + gap), y, w, h }));
+  }
+
+  return {
+    create(win) { getState(win); },
+
+    render(ctx, win) {
+      const s = getState(win);
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#15151a'; ctx.fillRect(0, 0, W, H);
+
+      // 工具栏
+      ctx.fillStyle = '#26262b'; ctx.fillRect(0, 0, W, TOOL_H);
+      for (const b of toolRects(win)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        wm_roundRect(ctx, b.x, b.y, b.w, b.h, 6); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = '16px -apple-system, "Apple Color Emoji", sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(b.icon, b.x + b.w / 2, b.y + b.h / 2);
+      }
+
+      // 文本区
+      const top = TOOL_H + 6;
+      const lines = s.text.split('\n');
+      const lh = 18, pad = 10;
+      const maxRows = Math.max(0, Math.floor((H - top - STATUS_H - 6) / lh));
+      const total = lines.length;
+      const start = Math.min(s.scroll, Math.max(0, total - maxRows));
+      ctx.font = '14px Consolas, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      for (let i = 0; i < maxRows && i + start < total; i++) {
+        const ln = lines[i + start];
+        ctx.fillStyle = '#d4d4d4';
+        ctx.fillText(ln.length > 200 ? ln.slice(0, 200) : ln, pad, top + i * lh);
+      }
+      // 光标（文末高亮）
+      const lastLine = lines[lines.length - 1] || '';
+      const cx = pad + ctx.measureText(lastLine).width;
+      const cy = top + (total - 1 - start) * lh;
+      if (cy < H - STATUS_H) {
+        ctx.fillStyle = '#4ec9b0';
+        ctx.fillRect(cx, cy, 2, 16);
+      }
+
+      // 状态栏
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(0, H - STATUS_H, W, STATUS_H);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '11px -apple-system, sans-serif';
+      ctx.fillText((s.status || s.path) + '  ' + s.text.length + ' 字符', 10, H - STATUS_H / 2);
+    },
+
+    onMouseDown(lx, ly, win) {
+      const s = getState(win);
+      if (ly < TOOL_H) {
+        for (const b of toolRects(win)) {
+          if (lx >= b.x && lx <= b.x + b.w && ly >= b.y && ly <= b.y + b.h) {
+            if (b.id === 'new') { s.text = ''; s.cursor = 0; s.status = '已新建'; }
+            else if (b.id === 'open') {
+              vfs.read(s.path).then(c => { s.text = (c == null ? '' : String(c)); s.cursor = s.text.length; s.status = '已打开'; })
+                .catch(() => { s.status = '读取失败'; });
+            } else if (b.id === 'save') {
+              vfs.write(s.path, s.text).then(ok => { s.status = ok ? '已保存' : '保存失败'; })
+                .catch(() => { s.status = '保存失败'; });
+            }
+            return;
+          }
+        }
+      }
+    },
+
+    async onKeyDown(e, win) {
+      const s = getState(win);
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === 's') {
+          vfs.write(s.path, s.text).then(ok => { s.status = ok ? '已保存' : '保存失败'; })
+            .catch(() => { s.status = '保存失败'; });
+          return true;
+        }
+        return false;
+      }
+      if (e.key === 'Enter') { s.text += '\n'; s.cursor = s.text.length; return true; }
+      if (e.key === 'Backspace') { if (s.text.length > 0) { s.text = s.text.slice(0, -1); s.cursor = s.text.length; } return true; }
+      if (e.key.length === 1 && !e.altKey) { s.text += e.key; s.cursor = s.text.length; return true; }
+      return false;
+    },
+
+    getCursor() { return 'text'; },
+  };
+
+  // 小工具：不依赖 wm 的 roundRect
+  function wm_roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
 }

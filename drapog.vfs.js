@@ -6,7 +6,7 @@
  *                - MemoryBackend   内存
  *                - FSAccessBackend 真实磁盘
  *              文本用 read/write，二进制用 readBytes/writeBytes。
- * @version     0.3.0
+ * @version     0.3.1
  */
 
 /* ============================================================
@@ -88,9 +88,16 @@ class MemoryBackend {
   _write(p, content) {
     const n = this._resolve(p);
     if (n && n.type === 'file') { n.content = String(content); n.bytes = null; n.size = String(content).length; return true; }
-    const r = this._resolveParent(p);
-    if (!r) return false;
-    r.parent.children.set(r.name, { type: 'file', name: r.name, content: String(content), size: String(content).length });
+    // 写入时自动创建缺失的父目录（与 FSAccessBackend 行为一致）
+    const segs = p.split('/').filter(Boolean);
+    const name = segs.pop();
+    const parentPath = '/' + segs.join('/');
+    if (parentPath !== '/') this._mkdir(parentPath);
+    const parent = this._resolve(parentPath);
+    if (!parent || parent.type !== 'dir') return false;
+    const existing = parent.children.get(name);
+    if (existing && existing.type === 'dir') return false;
+    parent.children.set(name, { type: 'file', name, content: String(content), bytes: null, size: String(content).length });
     return true;
   }
 
@@ -108,10 +115,16 @@ class MemoryBackend {
       n.bytes = bytes; n.content = null; n.size = bytes.length;
       return true;
     }
-    const r = this._resolveParent(p);
-    if (!r) return false;
-    r.parent.children.set(r.name, {
-      type: 'file', name: r.name, bytes, content: null, size: bytes.length,
+    const segs = p.split('/').filter(Boolean);
+    const name = segs.pop();
+    const parentPath = '/' + segs.join('/');
+    if (parentPath !== '/') this._mkdir(parentPath);
+    const parent = this._resolve(parentPath);
+    if (!parent || parent.type !== 'dir') return false;
+    const existing = parent.children.get(name);
+    if (existing && existing.type === 'dir') return false;
+    parent.children.set(name, {
+      type: 'file', name, bytes, content: null, size: bytes.length,
     });
     return true;
   }

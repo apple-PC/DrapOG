@@ -2,7 +2,7 @@
  * @file        drapog.shell.js
  * @module      drapog/shell
  * @summary     DrapShell 命令行（宿主层）
- * @version     0.7.0
+ * @version     0.8.0
  * @description 自举后：本类只做「宿主」，运行 System/shell.drap（DrapLang REPL）。
  *               REPL 经 term_read 拉行、经 syscall 调底层工具；宿主专属命令
  *               （mount/cc/load/save/asm/dis/dump/run…）经 term_hostcmd 委托回本类的
@@ -19,6 +19,7 @@ export class DrapShell {
     this.io = io;
     this.vfs = io.vfs;
     this.cwd = '/Users/guest';
+    this.registry = io.registry || null;   // 应用注册表（L3/L4 统一启动）
   }
 
   /* ============================================================
@@ -116,6 +117,21 @@ export class DrapShell {
     }
   }
 
+  /* run 命令：从注册表启动应用（L3/L4 统一启动）。无 registry 时回退演示 */
+  async _cmdRun(args) {
+    if (!this.registry) return this._runDemo();
+    const name = args[0];
+    if (!name) {
+      const ids = this.registry.all().filter(a => a.id !== 'appmgr').map(a => a.id);
+      if (this.io.print) this.io.print('run: 用法 run <app>');
+      if (this.io.print) this.io.print('可用: ' + ids.join(' '));
+      return;
+    }
+    const r = await this.registry.launch(name, { wm: (this.io && this.io.wm) || null, io: this.io });
+    if (r.error) { if (this.io.print) this.io.print(r.error); return; }
+    if (this.io.print) this.io.print('已启动 ' + name);
+  }
+
   /* ============================================================
      兼容模式 / 宿主专属命令（REPL 经 term_hostcmd 委托到这里）
      ============================================================ */
@@ -130,7 +146,7 @@ export class DrapShell {
       case 'help':    return this._cmdHelp();
       case 'clear':   return this.io.clear();
       case 'echo':    return this.io.print(args.join(' '));
-      case 'run':     return await this._runDemo();
+      case 'run':     return await this._cmdRun(args);
       case 'exit':    return this.io.exit();
       case 'gui':     return this.io.switchToGUI();
       case 'save':    return await this._cmdSave(args);

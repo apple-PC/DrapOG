@@ -2,7 +2,7 @@
  * @file        System/Boot/cmd.js
  * @module      drapog/boot/cmd
  * @summary     CMD 模式引导（支持滚动 + 系统调用）
- * @version     0.7.0
+ * @version     0.8.0
  */
 
 import { VM } from '../../drapog.vm.js';
@@ -11,6 +11,7 @@ import { DrapShell } from '../../drapog.shell.js';
 import { VFS } from '../../drapog.vfs.js';
 import { DrapSYS } from '../../drapog.sys.js';
 import { makeLineWriter } from '../../drapog.stream.js';
+import { AppRegistry } from '../../drapog.registry.js';
 
 const screen = document.getElementById('screen');
 
@@ -18,6 +19,18 @@ export function startCMD() {
   return new Promise(resolve => {
     const ctx = screen.getContext('2d');
     const vfs = new VFS();
+    // 应用注册表（L3/L4 统一启动）：cmd 模式无 WM，gui 型/host 型会提示进桌面；cli 型可运行
+    const registry = new AppRegistry();
+    registry.addHost('finder',   { name: 'Finder',   icon: '📁', title: 'Finder' });
+    registry.addHost('terminal', { name: 'Terminal', icon: '>',  title: 'Terminal' });
+    registry.addHost('paint',    { name: 'Paint',    icon: '🎨', title: 'Paint' });
+    registry.addHost('edit',     { name: 'TextEdit', icon: 'T',  title: 'TextEdit' });
+    registry.addHost('settings', { name: '设置',     icon: '⚙',  title: '设置' });
+    registry.addHost('about',    { name: '关于本机', icon: 'W',  title: '关于本机' });
+    registry.addHost('appmgr',   { name: '应用',     icon: '◆',  title: '应用' });
+    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui', file: '../app_gui.drap', baseUrl: import.meta.url });
+    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui', file: '../app_paint.drap', baseUrl: import.meta.url });
+    registry.scan(vfs, 'System/Apps').catch(() => {});
     const state = {
       lines: [], input: '', cursor: 0,
       history: [], histIdx: -1,
@@ -259,6 +272,8 @@ export function startCMD() {
 
     const shell = new DrapShell({
       vfs,
+      registry,
+      wm: null,
       print: s => { pushLine(s); draw(); },
       clear: () => { state.lines = []; state.scrollTop = 0; draw(); },
       exit: () => { cleanup(); resolve(); },
