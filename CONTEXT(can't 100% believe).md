@@ -98,9 +98,9 @@
 - 移动端软键盘：WM 软键盘 overlay + 菜单栏键盘按钮，焦点在 drapp 输入框时输入经宿主注入
 - Finder 增强：上一级按钮、顶部菜单、新建 txt/文件夹、系统目录进入需权限（双击拦截 + 允许后放行）、系统目录内禁止删除
 - DrapLang 完善：结构体成员赋值（p.x = 5 / p.x += 2）、数组元素赋值（a[i] = v）、复合赋值 += -= *= /= 真正可用（tokenizer 补齐复合赋值符）；test_draplang.mjs 覆盖 struct/member/array/split/短路/continue/嵌套 while 全绿
+- DrapLang 事件处理程序（event fn）：声明式 `event fn on_paint/on_click/on_key/on_input/on_close`，编译器自动合成事件循环（内联 main 作共享 setup + 内联各处理器体），零运行时改动；System/app_gui.drap 改用此写法，test_event.mjs + test_gui.mjs 全绿
 
 未完成：
-- DrapLang 事件处理程序（event fn）
 - 窗口管理器用 DrapLang 重写
 - 应用全部用 DrapLang 重写
 - 主题系统（macOS / Win11 双主题）
@@ -326,7 +326,7 @@ B. 系统调用层（当前正在做，设计已完成）
         fs_read / fs_write / fs_exists / fs_ls / fs_mkdir / fs_rm
         term_print / time_now
 - B5. 用 DrapLang 写读配置文件的小程序测试
-- B6. 事件机制（INT 0x81，event fn）
+- B6. 事件机制（event fn，编译器合成事件循环） ✅ 已实现
 - B7. Shell 用 DrapLang 重写 ✅（System/shell.drap，首个自举组件）
 
 C. GUI 补完
@@ -531,11 +531,13 @@ B10 堆 GC                   v1 不做，程序结束全清
 
 ### 后续阶段
 
-B6 事件机制：
-  event fn on_click(e: ClickEvent) { ... }
-  syscall ui_button(win, x, y, w, h, title)
-  syscall ui_on(ctrl, EVENT_CLICK, on_click)
-  JS 侧 DOM 事件 → 打包成结构体写进 VM 内存 → INT 0x81
+B6 事件机制（✅ 已实现，编译器级，零运行时改动）：
+  - 顶层 `event fn on_paint() / on_click(ev: str) / on_key(ev: str) / on_input(id: str, val: str) / on_close()`
+  - 编译策略：若存在 event fn，把 `entry fn main`（作 setup，其局部变量作为共享状态）内联进编译器**自动合成**的 `main`；main 先 LABEL 入口，再生成事件循环 `L1: e=win_get_event(); 按类型分发→内联各处理器体；处理器 return 跳到函数结尾 L_end；循环回 L1；L_end: RET`。
+  - 事件类型常量 EVENT_TYPES = {on_paint:'paint', on_click:'click', on_key:'key', on_input:'input', on_close:'close'}。
+  - 处理器内 `return 0` 由 genReturn 在事件上下文中改为跳到 L_end（不 RET）。
+  - 宿主端完全不用改：win_get_event 队列/阻塞、injectWinEvent 注入、控件框架的 click/input 注入均已就绪。
+  - 对照原设想（ui_button + ui_on 回调 + INT 0x81 结构体入堆）更轻：复用现有字符串事件，编译器承担分发，无需新 syscall。
 
 B7 Shell 用 DrapLang 重写（✅ 已完成）：
   // System/shell.drap —— 纯 DrapLang 的 REPL，只通过 syscall 调底层工具
@@ -563,18 +565,22 @@ B7 Shell 用 DrapLang 重写（✅ 已完成）：
 
 与 Shell 自举同一模式：DrapLang 写 GUI 程序，只调用底层 win_* 工具；JS 宿主负责创建真实窗口、重放绘制、注入输入。
 
-DrapLang 端（System/app_gui.drap）：
+DrapLang 端（System/app_gui.drap，声明式 event fn，编译器合成事件循环）：
   entry fn main() -> i32 {
     let win = syscall win_create("DrapApp 示例", 420, 320)
     let mode = 0
-    while (true) {
-      let e = syscall win_get_event()        // 阻塞等事件（与 term_read 同续体机制）
-      if (e == "paint")      { ... 按 mode 绘制背景/按钮/文字 ... }
-      else if (split(e," ")[0] == "click") { 解析坐标；命中按钮区 → mode++ 并 win_invalidate(win) }
-      else if (split(e," ")[0] == "key")   { mode++ 并 win_invalidate(win) }
-      else if (e == "close") { return 0 }
-    }
+    syscall win_button("go", 160, 60, 100, 40, "切换")   // 控件声明（paint 时宿主自动绘制）
   }
+  event fn on_paint() {
+    if (mode == 0) { syscall win_set_color(0,200,0) } else { syscall win_set_color(0,80,200) }
+    syscall win_fill_rect(0,0,420,320)                    // 背景
+    syscall win_set_color(255,255,255); syscall win_text(10,10,"mode=" + itoa(mode))
+  }
+  event fn on_click(e: str) {
+    if (split(e," ")[1] == "go") { mode = mode + 1; syscall win_invalidate(win) }
+  }
+  event fn on_key(e: str) { mode = mode + 1; syscall win_invalidate(win) }
+  // on_close 由编译器自动补：return 0 结束事件循环
 
 JS 宿主端（System/Boot/gui.js）：
   - launchDrapApp(wm, vfs, source)：编译 → 建 VM+sys → 跑 vm.run()；onWinCreate 调 wm.createWindow({appId:'__drapapp__'})，并挂 win.__sys = sys
@@ -665,5 +671,15 @@ Finder 增强（上级/新建/系统权限/预览）               ✅（commit 
 DrapLang struct 成员赋值 / 数组元素赋值 / 复合赋值    ✅（drapcc.js 0.7.0；tokenizer 补齐 += -= *= /=）
 test_draplang.mjs 17 项 / test_gui 6 项 / 全回归     ✅ 全绿
 
+## 十七、DrapLang 事件处理程序（event fn）完成情况（0.8.0）
+
+声明式事件处理                                       ✅（drapcc.js 0.8.0）
+编译器合成事件循环（内联 main 作共享 setup）          ✅（compile/genEventMain：LABEL main → L1 win_get_event → 类型分发内联处理器体 → 处理器 return 跳 L_end → 循环/退出）
+事件类型常量 EVENT_TYPES（paint/click/key/input/close）✅
+处理器内 return 在事件上下文改为跳 L_end（不 RET）    ✅（genReturn 加 insideEventHandler 分支）
+宿主零改动（win_get_event 队列/阻塞 + injectWinEvent 注入） ✅
+System/app_gui.drap 改用 event fn 写法                 ✅
+test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用演示 ✅ 全绿
+
 ---
-最后更新：2026-10-12　当前版本：0.7.0
+最后更新：2026-10-12　当前版本：0.8.0

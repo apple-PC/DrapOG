@@ -2,7 +2,7 @@
  * @file        drapcc.js
  * @module      drapog/drapcc
  * @summary     DrapLang 编译器（支持 syscall）
- * @version     0.7.0
+ * @version     0.8.0
  */
 
 /* ==================== 系统调用表 ==================== */
@@ -44,6 +44,15 @@ const SYS_TABLE = {
   'win_label':      0x51,
   'win_input_get':  0x52,
   'win_input':      0x53,
+};
+
+/* event fn 名称 → 事件类型字符串（分发时比对 __et） */
+const EVENT_TYPES = {
+  on_paint: 'paint',
+  on_click: 'click',
+  on_key:   'key',
+  on_input: 'input',
+  on_close: 'close',
 };
 
 const SYS_RET = {
@@ -154,6 +163,10 @@ export class DrapCC {
     this.labelId = 0;
     this.structs = new Map();
     this.funcs = new Map();
+    this.eventHandlers = new Map();
+    this.setupBody = null;
+    this.insideEventHandler = false;
+    this.eventMainEndLabel = null;
     this.curScope = null;
     this.curFn = null;
     this.loopStack = [];
@@ -164,9 +177,25 @@ export class DrapCC {
     this.pos = 0;
     const decls = this.parseProgram();
 
+    this.structs = new Map();
+    this.funcs = new Map();
+    this.eventHandlers = new Map();
+    this.setupBody = null;
+
     for (const d of decls) if (d.kind === 'struct') this.structs.set(d.name, d);
-    for (const d of decls) if (d.kind === 'fn') this.funcs.set(d.name, d);
-    for (const d of decls) if (d.kind === 'fn') this.genFn(d);
+    // 先收集 event fn（决定 entry main 是否作为 setup 内联进合成 main）
+    for (const d of decls) if (d.kind === 'eventfn') this.eventHandlers.set(d.name, d);
+    // 普通函数 / entry main
+    for (const d of decls) {
+      if (d.kind !== 'fn') continue;
+      if (d.isEntry && d.name === 'main' && this.eventHandlers.size > 0) {
+        this.setupBody = d.body;            // main 退化为 setup，内联进合成 main
+      } else {
+        this.funcs.set(d.name, d);
+      }
+    }
+    for (const d of this.funcs.values()) this.genFn(d);
+    if (this.eventHandlers.size > 0) this.genEventMain();
 
     return { instructions: this.instructions, strings: this.strings };
   }
@@ -256,6 +285,7 @@ export class DrapCC {
       const t = this.peek();
       if (t.type === 'IDENT' && t.value === 'struct') decls.push(this.parseStruct());
       else if (t.type === 'IDENT' && (t.value === 'fn' || t.value === 'entry')) decls.push(this.parseFn());
+      else if (t.type === 'IDENT' && t.value === 'event') decls.push(this.parseEventFn());
       else throw new Error('语法错误：顶层不认识 "' + t.value + '"');
     }
     return decls;
@@ -301,6 +331,31 @@ export class DrapCC {
     const body = this.parseBlockBody();
     this.expect('}');
     return { kind: 'fn', name, params, retType, body, isEntry };
+  }
+
+  parseEventFn() {
+    this.expect('event');
+    this.expect('fn');
+    const name = this.next().value;
+    if (!(name in EVENT_TYPES)) {
+      throw new Error('event fn 名称必须是 on_paint/on_click/on_key/on_input/on_close 之一，实际: ' + name);
+    }
+    this.expect('(');
+    const params = [];
+    if (!this.is(')')) {
+      while (true) {
+        const pname = this.next().value;
+        this.expect(':');
+        const ptype = this.parseType();
+        params.push({ name: pname, type: ptype });
+        if (!this.accept(',')) break;
+      }
+    }
+    this.expect(')');
+    this.expect('{');
+    const body = this.parseBlockBody();
+    this.expect('}');
+    return { kind: 'eventfn', name, params, body };
   }
 
   parseType() {
@@ -631,6 +686,83 @@ export class DrapCC {
     this.emit('RET', []);
   }
 
+  /* ==================== event fn 合成 main 事件循环 ==================== */
+  genEventMain() {
+    this.curFn = { name: 'main', params: [], retType: { kind: 'prim', name: 'i32' } };
+    this.curScope = new Scope(null);
+    this.loopStack = [];
+    this.insideEventHandler = false;
+
+    // 扫描局部（setup + 各 handler 体 + handler 参数 + 内部变量 __ev/__et）
+    if (this.setupBody) this.scanLocals(this.setupBody, this.curScope);
+    for (const h of this.eventHandlers.values()) {
+      for (const p of h.params) this.curScope.defineLocal(p.name, p.type);
+      this.scanLocals(h.body, this.curScope);
+    }
+    this.curScope.defineLocal('__ev', { kind: 'prim', name: 'str' });
+    this.curScope.defineLocal('__et', { kind: 'prim', name: 'str' });
+
+    this.emit('LABEL', ['main']);
+    this.emit('ENTER', []);
+    const nLocals = this.curScope.localCount();
+    if (nLocals > 0) this.emit('ALLOC', [String(nLocals)]);
+
+    // 内联 setup（创建窗口、初始化状态）
+    if (this.setupBody) for (const s of this.setupBody) this.genStmt(s);
+
+    const loopStart = this.newLabel('eloop');
+    const endL = this.newLabel('eend');
+    this.eventMainEndLabel = endL;
+    this.emit('LABEL', [loopStart]);
+
+    // __ev = syscall win_get_event()
+    this.genStmt({ kind: 'assign', target: { kind: 'ident', name: '__ev' }, op: '=',
+      value: { kind: 'syscall', name: 'win_get_event', args: [] } });
+    // __et = split(__ev, ' ')[0]  —— 取事件类型 token
+    this.genStmt({ kind: 'assign', target: { kind: 'ident', name: '__et' }, op: '=',
+      value: { kind: 'index',
+        obj: { kind: 'call', name: 'split', args: [ { kind: 'ident', name: '__ev' }, { kind: 'str', value: ' ' } ] },
+        index: { kind: 'num', value: 0 } } });
+
+    // 分发：paint / click / key / input（逆序构建 else-if 链）
+    const items = [
+      { t: 'paint', h: this.eventHandlers.get('on_paint') },
+      { t: 'click', h: this.eventHandlers.get('on_click') },
+      { t: 'key',   h: this.eventHandlers.get('on_key') },
+      { t: 'input', h: this.eventHandlers.get('on_input') },
+    ];
+    let chain = null;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (!it.h) continue;
+      const body = [];
+      for (const p of it.h.params) {
+        body.push({ kind: 'assign', target: { kind: 'ident', name: p.name }, op: '=', value: { kind: 'ident', name: '__ev' } });
+      }
+      for (const st of it.h.body) body.push(st);
+      const branch = { kind: 'block', body };
+      const cond = { kind: 'bin', op: '==', left: { kind: 'ident', name: '__et' }, right: { kind: 'str', value: it.t } };
+      chain = chain === null
+        ? { kind: 'if', cond, then: branch, alt: null }
+        : { kind: 'if', cond, then: branch, alt: chain };
+    }
+    this.insideEventHandler = true;          // 处理器体（含可能的 return）视为应用内上下文
+    if (chain) this.genStmt(chain);
+
+    // close：精确匹配完整事件串 'close'
+    this.genExpr({ kind: 'bin', op: '==', left: { kind: 'ident', name: '__ev' }, right: { kind: 'str', value: 'close' } });
+    this.emit('JZ', [loopStart]);
+    const closeH = this.eventHandlers.get('on_close');
+    if (closeH) for (const st of closeH.body) this.genStmt(st);
+    this.insideEventHandler = false;
+    this.emit('JMP', [endL]);
+
+    this.emit('LABEL', [endL]);
+    this.emit('LI', ['r0', '0']);
+    this.emit('LEAVE', []);
+    this.emit('RET', []);
+  }
+
   scanLocals(stmts, scope) {
     for (const s of stmts) {
       if (s.kind === 'let') {
@@ -786,6 +918,11 @@ export class DrapCC {
   }
 
   genReturn(s) {
+    if (this.insideEventHandler) {
+      // 处理器内的 return 直接退出整个应用（跳到合成 main 结尾）
+      this.emit('JMP', [this.eventMainEndLabel]);
+      return;
+    }
     if (s.expr) this.genExpr(s.expr);
     else this.emit('LI', ['r0', '0']);
     this.emit('LEAVE', []);

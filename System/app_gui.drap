@@ -1,40 +1,42 @@
 // DrapApp 示例 —— 完全用 DrapLang 编写，基于 win_gui 控件框架自举 GUI
-// 验证闭环：win_create → win_get_event（事件循环）→ win_label/win_button（声明式控件）
-//          → 点击按钮('click <id>')切换主题色 → close 停机
-// 控件由宿主自动绘制与命中：drapp 只在 paint 分支声明，不手绘矩形。
+// 使用 B6 事件机制（event fn）：编译器自动生成事件循环，处理器内联进合成 main，
+// 与 setup 共享同一局部作用域（mode / win）。
+//   on_paint  首帧与重绘时由宿主调用
+//   on_click  命中控件注入 "click <id>" / 空白 "click x y"
+//   on_key    任意按键
+//   on_close  窗口关闭（自动 return，无需手写）
 entry fn main() -> i32 {
     let win = syscall win_create("DrapApp 示例", 420, 320)
     let mode = 0
-    while (true) {
-        let e = syscall win_get_event()
-        let t = split(e, " ")[0]
-        if (t == "paint") {
-            // 背景随 mode 切换主题色（自绘）
-            if (mode == 0) { syscall win_set_color(28, 28, 34) }
-            else if (mode == 1) { syscall win_set_color(42, 22, 46) }
-            else { syscall win_set_color(20, 42, 32) }
-            syscall win_fill_rect(0, 0, 420, 320)
-            // 声明式控件：标题 + 按钮（宿主自动绘制与命中）
-            syscall win_label(40, 28, "DrapLang 控件框架示例")
-            syscall win_button("go", 40, 70, 160, 44)
-            syscall win_label(40, 130, "点击按钮切换主题色")
-            syscall win_label(40, 156, "mode = " + syscall itoa(mode))
-        } else if (t == "click") {
-            // 命中按钮时宿主注入 "click <id>"；空白处注入 "click x y"
-            let id = split(e, " ")[1]
-            if (id == "go") {
-                mode = mode + 1
-                if (mode > 2) { mode = 0 }
-                syscall win_invalidate(win)
-            }
-        } else if (t == "key") {
-            // 任意按键也切换一次主题，便于演示键盘事件
-            mode = mode + 1
-            if (mode > 2) { mode = 0 }
-            syscall win_invalidate(win)
-        } else if (e == "close") {
-            return 0
-        }
+    // 无 return：控制权交给编译器生成的事件循环
+}
+
+event fn on_paint() {
+    // 背景随 mode 切换主题色（自绘）
+    if (mode == 0) { syscall win_set_color(28, 28, 34) }
+    else if (mode == 1) { syscall win_set_color(42, 22, 46) }
+    else { syscall win_set_color(20, 42, 32) }
+    syscall win_fill_rect(0, 0, 420, 320)
+    // 声明式控件：标题 + 按钮（宿主自动绘制与命中）
+    syscall win_label(40, 28, "DrapLang 控件框架示例")
+    syscall win_button("go", 40, 70, 160, 44)
+    syscall win_label(40, 130, "点击按钮切换主题色")
+    syscall win_label(40, 156, "mode = " + syscall itoa(mode))
+}
+
+event fn on_click(ev: str) {
+    // 命中按钮时宿主注入 "click <id>"；空白处注入 "click x y"
+    let id = split(ev, " ")[1]
+    if (id == "go") {
+        mode = mode + 1
+        if (mode > 2) { mode = 0 }
+        syscall win_invalidate(win)
     }
-    return 0
+}
+
+event fn on_key(ev: str) {
+    // 任意按键也切换一次主题，便于演示键盘事件
+    mode = mode + 1
+    if (mode > 2) { mode = 0 }
+    syscall win_invalidate(win)
 }
