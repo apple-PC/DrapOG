@@ -2,10 +2,38 @@
  * @file        drapog.vm.js
  * @module      drapog/vm
  * @summary     DrapVM 虚拟机（支持系统调用）
- * @version     0.6.0
+ * @version     0.7.0
  */
 
 import { unpack } from './drapog.dbyte.js';
+
+/* ==================== 标准库内建函数表（BUILTIN id → 实现） ==================== */
+/* 传参 ABI 与 SYSCALL 一致：r1..r3 + r6 + r7（args[0..4]）。
+   返回数值直接进 r0；返回字符串则 pushStr 后返回堆指针。 */
+const BUILTIN_TABLE = {
+  // —— core（自动导入，始终可用）——
+  10: (a, vm) => { const n = parseInt(vm._getStr(a[0]), 10); return isNaN(n) ? 0 : n; }, // atoi
+  // —— math（需 import math）——
+  100: (a) => Math.abs(a[0]),
+  101: (a) => Math.min(a[0], a[1]),
+  102: (a) => Math.max(a[0], a[1]),
+  103: (a) => Math.sqrt(a[0]),
+  104: (a) => Math.pow(a[0], a[1]),
+  105: (a) => Math.floor(a[0]),
+  106: (a) => Math.ceil(a[0]),
+  107: (a) => Math.round(a[0]),
+  108: () => Math.floor(Math.random() * 32768),
+  109: (a) => { const [x, lo, hi] = a; return x < lo ? lo : (x > hi ? hi : x); }, // clamp
+  // —— str（需 import str）——
+  200: (a, vm) => vm.pushStr(vm._getStr(a[0]).toUpperCase()),
+  201: (a, vm) => vm.pushStr(vm._getStr(a[0]).toLowerCase()),
+  202: (a, vm) => vm.pushStr(vm._getStr(a[0]).trim()),
+  203: (a, vm) => (vm._getStr(a[0]).includes(vm._getStr(a[1])) ? 1 : 0),            // contains
+  204: (a, vm) => vm._getStr(a[0]).indexOf(vm._getStr(a[1])),                        // indexOf（未命中 -1）
+  205: (a, vm) => (vm._getStr(a[0]).startsWith(vm._getStr(a[1])) ? 1 : 0),
+  206: (a, vm) => (vm._getStr(a[0]).endsWith(vm._getStr(a[1])) ? 1 : 0),
+  207: (a, vm) => vm.pushStr(vm._getStr(a[0]).repeat(Math.max(0, a[1]))),            // repeat
+};
 
 export class VM {
   constructor(program, onOutput) {
@@ -138,6 +166,14 @@ export class VM {
     this.regs[0] = typeof r === 'number' ? r : 0;
     this.steps = 0;   // P0-4：每次系统调用（yield 点）重置步数预算，长驻交互程序（B7 Shell）永不撞线
     this.pc++;
+  }
+
+  _doBuiltin(id) {
+    const fn = BUILTIN_TABLE[id];
+    if (!fn) throw new Error('VM: 未知内建函数 id ' + id);
+    const args = [this.regs[1], this.regs[2], this.regs[3], this.regs[6], this.regs[7]];
+    const r = fn(args, this);
+    this.regs[0] = (r === undefined || r === null) ? 0 : r;
   }
 
   execute(ins) {
@@ -371,6 +407,8 @@ export class VM {
       }
 
       case 'HLT': this.halted = true; return;
+
+      case 'BUILTIN': { this._doBuiltin(parseInt(args[0], 10)); this.pc++; return; }
 
       default: throw new Error('VM: 未知指令 ' + op);
     }

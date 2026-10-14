@@ -2,7 +2,7 @@
  * @file        drapcc.js
  * @module      drapog/drapcc
  * @summary     DrapLang 编译器（支持 syscall）
- * @version     0.8.0
+ * @version     0.9.0
  */
 
 /* ==================== 系统调用表 ==================== */
@@ -54,6 +54,38 @@ const EVENT_TYPES = {
   on_input: 'input',
   on_close: 'close',
 };
+
+/* ==================== 标准库模块 + 内建函数 ==================== */
+const BUILTIN_MODULES = { core: true, math: true, str: true };
+
+/* name → { mod, id, arity }；调用前编译器校验 imports 含 mod（core 自动导入） */
+const BUILTINS = {
+  // core（自动，始终可用）
+  atoi:   { mod: 'core', id: 10,  arity: 1 },
+  // math（需 import math）
+  abs:    { mod: 'math', id: 100, arity: 1 },
+  min:    { mod: 'math', id: 101, arity: 2 },
+  max:    { mod: 'math', id: 102, arity: 2 },
+  sqrt:   { mod: 'math', id: 103, arity: 1 },
+  pow:    { mod: 'math', id: 104, arity: 2 },
+  floor:  { mod: 'math', id: 105, arity: 1 },
+  ceil:   { mod: 'math', id: 106, arity: 1 },
+  round:  { mod: 'math', id: 107, arity: 1 },
+  rand:   { mod: 'math', id: 108, arity: 0 },
+  clamp:  { mod: 'math', id: 109, arity: 3 },
+  // str（需 import str）
+  toUpper:    { mod: 'str', id: 200, arity: 1 },
+  toLower:    { mod: 'str', id: 201, arity: 1 },
+  trim:       { mod: 'str', id: 202, arity: 1 },
+  contains:   { mod: 'str', id: 203, arity: 2 },
+  indexOf:    { mod: 'str', id: 204, arity: 2 },
+  startsWith: { mod: 'str', id: 205, arity: 2 },
+  endsWith:   { mod: 'str', id: 206, arity: 2 },
+  repeat:     { mod: 'str', id: 207, arity: 2 },
+};
+
+/* 返回字符串（堆指针）的 builtin，inferType 据此判定 str 型 */
+const BUILTIN_RET_STR = new Set(['toUpper', 'toLower', 'trim', 'repeat']);
 
 const SYS_RET = {
   'fs_read':    { kind: 'prim', name: 'str' },
@@ -170,11 +202,13 @@ export class DrapCC {
     this.curScope = null;
     this.curFn = null;
     this.loopStack = [];
+    this.imports = new Set(['core']);
   }
 
   compile() {
     this.tokens = this.tokenize(this.source);
     this.pos = 0;
+    this.imports = new Set(['core']);
     const decls = this.parseProgram();
 
     this.structs = new Map();
@@ -205,19 +239,24 @@ export class DrapCC {
     const tokens = [];
     let i = 0;
     const n = src.length;
+    let line = 1;
+    const push = (o) => { o.line = line; tokens.push(o); };
     while (i < n) {
+      this.curLine = line;
       const c = src[i];
+      if (c === '\n') { line++; i++; continue; }
       if (/\s/.test(c)) { i++; continue; }
       if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
       if (c === '/' && src[i + 1] === '*') {
         i += 2;
-        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i++;
+        while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') line++; i++; }
         i += 2; continue;
       }
       if (c === '"') {
         i++;
         let s = '';
         while (i < n && src[i] !== '"') {
+          if (src[i] === '\n') line++;
           if (src[i] === '\\') {
             i++;
             const e = src[i];
@@ -227,7 +266,7 @@ export class DrapCC {
           } else s += src[i++];
         }
         i++;
-        tokens.push({ type: 'STR', value: s }); continue;
+        push({ type: 'STR', value: s }); continue;
       }
       if (c === "'") {
         i++;
@@ -239,31 +278,40 @@ export class DrapCC {
           i++;
         } else s = src[i++];
         i++;
-        tokens.push({ type: 'CHAR', value: s }); continue;
+        push({ type: 'CHAR', value: s }); continue;
       }
       if (/\d/.test(c)) {
         let j = i;
         while (j < n && /\d/.test(src[j])) j++;
-        tokens.push({ type: 'NUM', value: parseInt(src.slice(i, j), 10) });
+        push({ type: 'NUM', value: parseInt(src.slice(i, j), 10) });
         i = j; continue;
       }
       if (/[A-Za-z_]/.test(c)) {
         let j = i;
         while (j < n && /[A-Za-z0-9_]/.test(src[j])) j++;
-        tokens.push({ type: 'IDENT', value: src.slice(i, j) });
+        push({ type: 'IDENT', value: src.slice(i, j) });
         i = j; continue;
       }
       const two = src.substr(i, 2);
       if (['==','!=','<=','>=','&&','||','->','+=','-=','*=','/='].includes(two)) {
-        tokens.push({ type: 'OP', value: two }); i += 2; continue;
+        push({ type: 'OP', value: two }); i += 2; continue;
       }
       if ('(){}[]=+-*/%<>!;:,.&|^'.includes(c)) {
-        tokens.push({ type: 'OP', value: c }); i++; continue;
+        push({ type: 'OP', value: c }); i++; continue;
       }
-      throw new Error('词法错误：未知字符 "' + c + '"');
+      throw this._err('词法错误：未知字符 "' + c + '"');
     }
-    tokens.push({ type: 'EOF', value: null });
+    push({ type: 'EOF', value: null });
     return tokens;
+  }
+
+  // 带行号的错误：报错时若当前 token 有 line 信息则前缀「行 N：」
+  _err(msg) {
+    let ln = '?';
+    const t = (this.tokens && this.pos != null) ? this.tokens[this.pos] : undefined;
+    if (t && typeof t.line === 'number') ln = t.line;
+    else if (typeof this.curLine === 'number') ln = this.curLine;
+    return new Error('行 ' + ln + '：' + msg);
   }
 
   peek(k) { return this.tokens[this.pos + (k || 0)]; }
@@ -275,7 +323,7 @@ export class DrapCC {
   accept(v) { if (this.is(v)) { this.pos++; return true; } return false; }
   expect(v) {
     if (this.accept(v)) return;
-    throw new Error('语法错误：期望 "' + v + '"，实际 "' + (this.peek().value || '<eof>') + '"');
+    throw this._err('期望 "' + v + '"，实际 "' + (this.peek().value || '<eof>') + '"');
   }
 
   /* ==================== 语法 ==================== */
@@ -286,9 +334,20 @@ export class DrapCC {
       if (t.type === 'IDENT' && t.value === 'struct') decls.push(this.parseStruct());
       else if (t.type === 'IDENT' && (t.value === 'fn' || t.value === 'entry')) decls.push(this.parseFn());
       else if (t.type === 'IDENT' && t.value === 'event') decls.push(this.parseEventFn());
-      else throw new Error('语法错误：顶层不认识 "' + t.value + '"');
+      else if (t.type === 'IDENT' && t.value === 'import') this.parseImport();
+      else throw this._err('顶层不认识 "' + t.value + '"');
     }
     return decls;
+  }
+
+  parseImport() {
+    this.expect('import');
+    const name = this.next().value;
+    if (!(name in BUILTIN_MODULES)) {
+      throw this._err('未知模块 "' + name + '"（可选：core / math / str）');
+    }
+    this.imports.add(name);
+    this.accept(';');
   }
 
   parseStruct() {
@@ -338,7 +397,7 @@ export class DrapCC {
     this.expect('fn');
     const name = this.next().value;
     if (!(name in EVENT_TYPES)) {
-      throw new Error('event fn 名称必须是 on_paint/on_click/on_key/on_input/on_close 之一，实际: ' + name);
+      throw this._err('event fn 名称必须是 on_paint/on_click/on_key/on_input/on_close 之一，实际: ' + name);
     }
     this.expect('(');
     const params = [];
@@ -360,7 +419,7 @@ export class DrapCC {
 
   parseType() {
     const t = this.next();
-    if (t.type !== 'IDENT') throw new Error('期望类型名，实际 "' + t.value + '"');
+    if (t.type !== 'IDENT') throw this._err('期望类型名，实际 "' + t.value + '"');
     if (this.accept('[')) {
       const elem = this.parseType();
       this.expect(']');
@@ -562,7 +621,7 @@ export class DrapCC {
           }
         }
         this.expect(')');
-        if (e.kind !== 'ident') throw new Error('只能调用命名函数');
+        if (e.kind !== 'ident') throw this._err('只能调用命名函数');
         e = { kind: 'call', name: e.name, args };
       } else if (this.is('[')) {
         this.next();
@@ -598,7 +657,7 @@ export class DrapCC {
     if (t.type === 'IDENT' && t.value === 'syscall') {
       this.next();
       const nameTok = this.peek();
-      if (nameTok.type !== 'IDENT') throw new Error('syscall 后期望名字，实际 "' + nameTok.value + '"');
+      if (nameTok.type !== 'IDENT') throw this._err('syscall 后期望名字，实际 "' + nameTok.value + '"');
       const name = this.next().value;
       this.expect('(');
       const args = [];
@@ -652,7 +711,7 @@ export class DrapCC {
       this.expect(']');
       return { kind: 'arraylit', items };
     }
-    throw new Error('语法错误：无法解析表达式，遇到 "' + (t.value || '<eof>') + '"');
+    throw this._err('无法解析表达式，遇到 "' + (t.value || '<eof>') + '"');
   }
 
   /* ==================== 代码生成 ==================== */
@@ -1015,6 +1074,36 @@ export class DrapCC {
     this.emit('SYSCALL', [String(num)]);
   }
 
+  // 内建函数：调用约定与 syscall 一致（r1..r3 + r6 + r7），结果回 r0
+  genBuiltin(id, args) {
+    const n = args.length;
+    for (let i = n - 1; i >= 1; i--) {
+      this.genExpr(args[i]);
+      this.emit('PUSH', ['r0']);
+    }
+    if (n >= 1) {
+      this.genExpr(args[0]);
+      this.emit('MOV', ['r1', 'r0']);
+    }
+    if (n >= 2) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r2', 'r0']);
+    }
+    if (n >= 3) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r3', 'r0']);
+    }
+    if (n >= 4) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r6', 'r0']);
+    }
+    if (n >= 5) {
+      this.emit('POP', ['r0']);
+      this.emit('MOV', ['r7', 'r0']);
+    }
+    this.emit('BUILTIN', [String(id)]);
+  }
+
   genBin(node) {
     const lt = this.inferType(node.left);
     const rt = this.inferType(node.right);
@@ -1119,6 +1208,17 @@ export class DrapCC {
       this.emit('POP', ['r0']);
       this.emit('STRSUB', ['r0', 'r1', 'r2']);
       this.emit('MOV', ['r0', 'r2']);
+      return;
+    }
+    const bi = BUILTINS[node.name];
+    if (bi) {
+      if (!this.imports.has(bi.mod)) {
+        throw new Error(node.name + ' 属于模块 ' + bi.mod + '，需先 `import ' + bi.mod + '`');
+      }
+      if (node.args.length !== bi.arity) {
+        throw new Error(node.name + ' 需要 ' + bi.arity + ' 个参数，实际 ' + node.args.length + ' 个');
+      }
+      this.genBuiltin(bi.id, node.args);
       return;
     }
     const fn = this.funcs.get(node.name);
@@ -1241,6 +1341,9 @@ export class DrapCC {
       case 'call': {
         const fn = this.funcs.get(node.name);
         if (fn) return fn.retType;
+        if (node.name in BUILTINS) {
+          return BUILTIN_RET_STR.has(node.name) ? { kind: 'prim', name: 'str' } : { kind: 'prim', name: 'i32' };
+        }
         if (node.name === 'len') return { kind: 'prim', name: 'i32' };
         if (node.name === 'split') return { kind: 'array', elem: { kind: 'prim', name: 'str' } };
         if (node.name === 'substr') return { kind: 'prim', name: 'str' };

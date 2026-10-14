@@ -99,6 +99,7 @@
 - Finder 增强：上一级按钮、顶部菜单、新建 txt/文件夹、系统目录进入需权限（双击拦截 + 允许后放行）、系统目录内禁止删除
 - DrapLang 完善：结构体成员赋值（p.x = 5 / p.x += 2）、数组元素赋值（a[i] = v）、复合赋值 += -= *= /= 真正可用（tokenizer 补齐复合赋值符）；test_draplang.mjs 覆盖 struct/member/array/split/短路/continue/嵌套 while 全绿
 - DrapLang 事件处理程序（event fn）：声明式 `event fn on_paint/on_click/on_key/on_input/on_close`，编译器自动合成事件循环（内联 main 作共享 setup + 内联各处理器体），零运行时改动；System/app_gui.drap 改用此写法，test_event.mjs + test_gui.mjs 全绿
+- DrapLang 标准库（stdlib）+ 模块导入 + 编译器行号诊断：drapcc.js 加 `import math/str`（core 自动，math/str 需显式导入）；新增内建函数——core: `atoi`；math: `abs/min/max/sqrt/pow/floor/ceil/round/rand/clamp`；str: `toUpper/toLower/trim/contains/indexOf/startsWith/endsWith/repeat`（字符串型内建返回堆指针，inferType 已识别）；drapog.vm.js 加 `BUILTIN` 指令 + JS 实现表（复用 syscall 传参 ABI r1..r3+r6+r7）；token 带行号，解析错误输出 `行 N：...`；test_stdlib.mjs 28 项全绿，全套 9 文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -681,5 +682,33 @@ test_draplang.mjs 17 项 / test_gui 6 项 / 全回归     ✅ 全绿
 System/app_gui.drap 改用 event fn 写法                 ✅
 test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用演示 ✅ 全绿
 
+## 十八、L2 夯实：标准库 / import 模块 / 编译器行号诊断（0.9.0）
+
+### 背景
+路线把「底层语言·工具（L2）」作为地基优先夯实。本次补两块：
+1. **标准库（stdlib）**：之前只有 len/split/substr 三个编译器内建，没有成体系的函数层；
+2. **编译器诊断**：报错不带位置，开发体验差。
+
+### 标准库设计
+- 模块机制：`import math` / `import str`；`core` 自动导入（始终可用），math/str 需显式导入（门禁在编译期校验 imports）。
+- 编译器加 `BUILTIN_MODULES` / `BUILTINS` 表（name → {mod,id,arity}）；`genCall` 在 len/split/substr 之后、用户函数之前查 BUILTINS，未导入则报「需先 import <mod>」；`genBuiltin` 复用 syscall 传参 ABI（r1..r3+r6+r7）发 `BUILTIN` 指令。
+- VM 加 `BUILTIN` 指令 + `BUILTIN_TABLE`（JS 实现）：字符串型内建（toUpper/toLower/trim/repeat）返回堆指针；数值型返回 i32。
+- `inferType` 识别字符串型内建，确保 `term_print(toUpper(...))` 走 PRINTSTR 而非 PRINTINT（否则会把字符串指针当数字打印）。
+
+内建清单：
+- core（自动）：`atoi(s)`
+- math（需 import）：`abs/min/max/sqrt/pow/floor/ceil/round/rand/clamp`
+- str（需 import）：`toUpper/toLower/trim/contains/indexOf/startsWith/endsWith/repeat`
+
+### 编译器行号诊断
+- tokenize 全程维护 `line`，每个 token 带 `line`；新增 `_err(msg)` 在报错时前缀「行 N：」。
+- 修复：`_err` 在 tokenize 内部调用时 `this.tokens` 尚未挂载，回退到 `this.curLine`，避免 NaN 崩溃。
+- 关键解析错误（顶层/类型名/syscall/表达式/event fn/import/词法）全部改用 `_err`。
+
+### 验证
+- test_stdlib.mjs 28 项全绿（core + math + str + 模块门禁 + 未知模块 + 行号诊断）。
+- 全套 9 个测试文件（b7/shell/host/gui/paint/finder/draplang/event/stdlib）回归无回归。
+- 版本号：drapcc.js 0.9.0，drapog.vm.js 0.7.0。
+
 ---
-最后更新：2026-10-12　当前版本：0.8.0
+最后更新：2026-10-14　当前版本：0.9.0
