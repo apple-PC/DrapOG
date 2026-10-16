@@ -106,6 +106,7 @@
 - **L3 统一启动器**：CMD 的 `run <app>` 与 GUI 的 dock / AppMgr 点击都收敛到同一个 `AppRegistry.launch(id, env)`；env = { wm, io }，按类型分派——host → `wm.launchApp`、gui → `launchDrapApp`、cli → `runDrapCli`。CMD 不再硬编码应用列表
 - **L4 应用格式 `.app` + 注册表**：引入 `drapog.registry.js`（AppRegistry，无 DOM 依赖）与 `drapog.launcher.js`（DrapLang 应用启动器，从 gui.js 抽出）；`.app` 包 = `Name.app/Info.json`（`{id,name,icon,type:cli|gui,entry,version}`）+ `main.drap`（DrapLang 源）。注册表支持三种登记：`addHost`（内建宿主应用）、`addDrap`（代码显式登记，内存模式用 `import.meta.url` 拉源码）、`addDrapVfs`（`scan(vfs,'System/Apps')` 扫描挂载盘上的 `.app` 包）。已内置 `System/Apps/GuiDemo.app`、`System/Apps/Paint.app` 两个 `.app` 包
 - TextEdit 应用（createEditApp：读写 `/Users/guest/Documents/readme.txt`）、Settings 应用（createSettingsApp：软键盘开关）、About 应用（createAboutApp）现已接入 dock，修复了此前 dock 上 edit/settings/about 点击开空窗的 bug
+- **L4 完善（1.1.0）**：DrapLang 支持 `import "name"` 文件级模块（多文件 app 可拆模块，registry 按 `modules` 自动拉取兄弟 `.drap`）；`.app` 格式升级（`Info.json` 增 `author/description/category/minVersion/permissions/modules`，`entry` 支持 `.dbyte` 预编译入口，扫描校验必填字段）；Shell 新增应用管理命令 `apps`/`info`/`pack`/`install`/`uninstall`；WM `launchApp` 增加 registry 回退、dock 加入 guidemo/hello，使纯 DrapLang 应用从 dock 也能启动；新增 CLI 示例 `System/Apps/Hello.app`；`.app/main.drap` 成为唯一真源（旧 `System/app_gui.drap`/`app_paint.drap` 仅留作旧测试）。test_modules.mjs(8) + test_l4.mjs(19) + test_registry.mjs(16) 全绿
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -715,27 +716,33 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 9 个测试文件（b7/shell/host/gui/paint/finder/draplang/event/stdlib）回归无回归。
 - 版本号：drapcc.js 0.9.0，drapog.vm.js 0.7.0。
 
-## 十九、L3/L4 完成情况（应用注册表 + .app 格式 1.0.0）
+## 十九、L3/L4 完成情况（应用注册表 + .app 格式 1.1.0）
 
 ### 背景
 路线：构思框架 → 构思细节 → 底层语言·工具（L2）→ cmd 调用（L3）→ 整合 draplang 工具、制定格式（L4）→ GUI 使用（L5）。
 本次把「应用的发现 / 注册 / 启动」收敛为统一抽象，让 CMD 的 `run`、GUI 的 dock、AppMgr 点击走同一套逻辑。
 
 ### 新增文件
-- `drapog.registry.js` 1.0.0：AppRegistry（无 DOM 依赖）。方法：`addHost(id,{name,icon,title})`、`addDrap(id,{name,icon,type,file,baseUrl})`（`url = new URL(file, baseUrl).href`）、`addDrapVfs(id,{name,icon,type,entry})`、`scan(vfs, dir='System/Apps')`（读 `*.app/Info.json`）、`get(id)`、`all()`、`launch(id, env={wm, io})`。
-  - launch 分派：`host` → `wm.launchApp({id, letter, title})`（无 wm 提示「请用 gui 进入桌面」）；`gui` → 拉源码（`a.url` 用 fetch，`a.entry` 用 `vfs.read`）交给 `launchDrapApp`（无 wm 提示 GUI 应用）；`cli` → 源码交给 `runDrapCli`（输出收敛到 `io.print`，无 wm 也能跑）。
-- `drapog.launcher.js` 1.0.0：从 gui.js 抽出的 DrapLang 应用启动层。导出 `drapAppBridge`（render / onMouseDown / onKeyDown 重放绘制与注入事件）、`launchDrapApp(wm, vfs, source)`、`launchDrapAppUrl(wm, vfs, url)`、`runDrapCli(vfs, io, source)`。依赖 DrapCC / VM / DrapSYS / makeLineWriter。
+- `drapog.registry.js` 1.1.0：AppRegistry（无 DOM 依赖）。方法：`addHost(id,{name,icon,title})`、`addDrap(id,{name,icon,type,file,baseUrl,version,author,description,category})`（`url = new URL(file, baseUrl).href`）、`addDrapVfs(id,info)`、`register(app)`（install 用）、`unregister(id)`（uninstall 用）、`scan(vfs, dir='System/Apps')`（读 `*.app/Info.json` 并校验必填字段）、`get(id)`、`all()`、`launch(id, env={wm, io})`、`resolve(entry, vfs)`（解析 drap 源码 / dbyte 预编译产物 + 模块源）。
+  - launch 分派：`host` → `wm.launchApp({id, letter, title})`（无 wm 提示「请用 gui 进入桌面」）；`gui` → 拉源码（`a.url` 用 fetch，`a.entry` 用 `vfs.read`）交给 `launchDrapApp`/`launchDrapAppProgram`（无 wm 提示 GUI 应用）；`cli` → 源码交给 `runDrapCli`/`runDrapCliProgram`（输出收敛到 `io.print`，无 wm 也能跑）。
+- `drapog.launcher.js`（1.0.0 → 新增 program 重载）：`drapAppBridge`（render / onMouseDown / onKeyDown）、`launchDrapApp(wm,vfs,source,opts)`（opts.modules 支持文件级模块）、`launchDrapAppProgram(wm,vfs,program)`、`runDrapCli(vfs,io,source,opts)`、`runDrapCliProgram(vfs,io,program)`。
 
-### .app 包格式（L4）
-`Name.app/` 目录 = `Info.json`（`{id, name, icon, type: cli|gui, entry, version}`）+ `main.drap`（DrapLang 源）。
-已内置：`System/Apps/GuiDemo.app`（id=guidemo，gui）、`System/Apps/Paint.app`（id=paint，gui）。
-内存模式（未挂载真实磁盘）下 MemoryBackend 不播种 `.drap` 文件，故 gui.js / cmd.js 用 `addDrap(..., {file:'../app_gui.drap', baseUrl: import.meta.url})` 代码显式登记已知 DrapLang 应用；挂载真实磁盘后 `scan('System/Apps')` 自动扩展发现盘上的 `.app` 包（fire-and-forget，失败不阻断启动）。
+### .app 包格式（L4 v1.1）
+`Name.app/` 目录 = `Info.json` + `main.drap`（或 `main.dbyte` 预编译入口）。
+- `Info.json` 字段：必填 `id / name / type(gui|cli) / entry`；可选 `version / icon / author / description / category / minVersion / permissions / modules`（modules 为兄弟 `.drap` 基名数组，供 app 内 `import "name"` 文件级模块解析）。扫描时校验必填字段，缺字段/损坏的包跳过告警。
+- 内置包：`System/Apps/GuiDemo.app`（guidemo, gui）、`System/Apps/Paint.app`（paint, gui）、`System/Apps/Hello.app`（hello, cli）。
+- **唯一真源**：gui.js / cmd.js 的 `addDrap` 现指向 `../Apps/<Name>.app/main.drap`（取代旧的 `System/app_gui.drap` / `app_paint.drap`，后者仅保留供旧测试）。挂载真实磁盘后 `scan('System/Apps')` 自动扩展发现盘上的 `.app` 包（fire-and-forget）。
+- 预编译入口：entry 为 `.dbyte` 时，`resolve` 经 `drapog.dbyte.unpack` 还原 program，直接 `launchDrapAppProgram` / `runDrapCliProgram`，免去运行时编译。
 
 ### 接线
-- CMD（System/Boot/cmd.js 0.8.0）：构建与 gui 同款 registry（host + addDrap guidemo/paint + scan），注入 `DrapShell({registry, wm:null})`；`run <app>` 命令 → `registry.launch(name, {wm:null, io})`。
-- Shell（drapog.shell.js 0.8.0）：新增 `run` 命令（`_cmdRun`），有 registry 时列出 id 或启动，无 registry 回退 `_runDemo()`。
-- GUI（System/Boot/gui.js 1.0.0）：构建 registry 并注册全部宿主应用实现（含 createEditApp / createSettingsApp / createAboutApp，修复此前 dock 上 edit/settings/about 点击开空窗的 bug）；AppMgr 改为 `registry.all()` + `registry.launch`；自动启动改 `registry.launch('guidemo', {wm, vfs})`。
-- `drapog.apps.js` 1.0.0：AppMgr 重写为 registry 驱动；新增 createEditApp（读写 `/Users/guest/Documents/readme.txt`）、createSettingsApp（软键盘开关）、createAboutApp。
+- CMD（System/Boot/cmd.js 0.9.0）：构建与 gui 同款 registry（host + addDrap guidemo/paint/hello + scan），注入 `DrapShell({registry, wm:null})`；`run <app>` → `registry.launch(name, {wm:null, io})`。
+- Shell（drapog.shell.js 0.9.0）：新增 `run` 命令；新增应用管理命令 `apps` / `info <id>` / `pack <in.drap> [name] [-gui]` / `install <src.app>` / `uninstall <id>`（install/uninstall 经 `registry.scan` / `unregister` 同步注册表，VFS 用递归 `_copyTree` / `_rmTree`）。
+- GUI（System/Boot/gui.js 1.1.0）：构建 registry 并注册全部宿主应用实现；`wm.vfs` / `wm.registry` 注入 WM；AppMgr 改为 `registry.all()` + `registry.launch`；dock 增加 `guidemo` / `hello` 图标，WM `launchApp` 增加「无 WM 实现但注册表有」的 registry 回退，使 dock 也能启动纯 DrapLang 应用；自动启动 `registry.launch('guidemo')`。
+- WM（drapog.wm.js 0.6.0）：`launchApp` 增加 registry 回退；dock 列表加入 guidemo/hello。
+- `drapog.apps.js` 1.1.0：AppMgr 重写（registry 驱动，单元格显示图标 + name + `v版本 · category`）；新增 createEditApp / createSettingsApp / createAboutApp。
+
+### DrapLang 文件级模块（L4 配套，drapcc.js 0.9.0）
+`import "name"` 现支持「文件模块」：`DrapCC(source, { modules:{name:source} })` 在解析主源后 BFS 解析各模块源，合并其函数/结构体声明（模块内禁止 entry/event）。`runDrapCli` / `launchDrapApp` 透传 `opts.modules`，registry 的 `resolve` 按 `entry.modules` 自动拉取兄弟 `.drap`。测试 test_modules.mjs 8 项全绿（含嵌套 import、模块返回字符串、未声明模块报错）。
 
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
@@ -743,8 +750,10 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - VFS（drapog.vfs.js 0.3.1）MemoryBackend 的 `write`/`writeBytes` 原先不会自动创建缺失的父目录（FSAccessBackend 会），导致内存模式下写嵌套路径静默失败、scan 因 `System/Apps` 不存在提前返回；现写入前自动 `_mkdir` 父目录，与 FSAccess 行为一致。
 
 ### 验证
-- test_registry.mjs 9 项全绿：scan 发现 cli/gui 型 .app；all 含 host+drapp；launch 的 host/gui/cli 三分支；无 wm 时 host/gui 提示；未知 id 报错。
-- 全套 10 个测试文件（b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry）全绿，无回归。
+- test_registry.mjs 16 项全绿：scan 发现 cli/gui 型 .app、必填字段校验跳过、元数据入库、register/unregister、launch host/gui/cli 三分支、无 wm 提示、未知 id 报错、dbyte 预编译入口。
+- test_modules.mjs 8 项全绿（文件级模块）。
+- test_l4.mjs 19 项全绿：scan 采元数据、CLI 运行、dbyte 入口、shell 的 pack/apps/info/install/uninstall。
+- 全套 12 个测试文件（b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-14　当前版本：1.0.0
+最后更新：2026-10-14　当前版本：1.1.0

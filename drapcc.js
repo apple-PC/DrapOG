@@ -187,8 +187,11 @@ class Scope {
 }
 
 export class DrapCC {
-  constructor(source) {
+  constructor(source, options = {}) {
     this.source = source;
+    this.options = options;
+    this.moduleMap = options.modules || null;       // { name: sourceString }
+    this.resolveModule = options.resolveModule || null; // (name) => sourceString | null
     this.instructions = [];
     this.strings = [];
     this.stringMap = new Map();
@@ -203,13 +206,29 @@ export class DrapCC {
     this.curFn = null;
     this.loopStack = [];
     this.imports = new Set(['core']);
+    this.fileImports = [];
   }
 
   compile() {
     this.tokens = this.tokenize(this.source);
     this.pos = 0;
     this.imports = new Set(['core']);
-    const decls = this.parseProgram();
+    this.fileImports = [];
+
+    const decls = this._parseToplevel();
+
+    // 解析文件级模块 import（BFS，支持嵌套 import）
+    const seen = new Set();
+    while (this.fileImports.length) {
+      const name = this.fileImports.shift();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      let msrc = this.resolveModule ? this.resolveModule(name) : null;
+      if (msrc == null && this.moduleMap) msrc = this.moduleMap[name];
+      if (msrc == null) throw this._err('找不到模块 "' + name + '"（检查 modules 列表或 resolveModule）');
+      const mdecls = this._parseFromSource(msrc);
+      for (const d of mdecls) decls.push(d);
+    }
 
     this.structs = new Map();
     this.funcs = new Map();
@@ -327,7 +346,8 @@ export class DrapCC {
   }
 
   /* ==================== 语法 ==================== */
-  parseProgram() {
+  // 解析「当前已 tokenize 且 pos 已归零」的源码里的顶层声明；import 仅登记，不产出 decl
+  _parseToplevel() {
     const decls = [];
     while (this.peek().type !== 'EOF') {
       const t = this.peek();
@@ -340,8 +360,33 @@ export class DrapCC {
     return decls;
   }
 
+  // 把一段「模块源码」tokenize 后解析其顶层声明；模块只允许 struct / fn / import，禁止 entry / event
+  _parseFromSource(src) {
+    this.tokens = this.tokenize(src);
+    this.pos = 0;
+    const decls = [];
+    while (this.peek().type !== 'EOF') {
+      const t = this.peek();
+      if (t.type === 'IDENT' && t.value === 'struct') decls.push(this.parseStruct());
+      else if (t.type === 'IDENT' && t.value === 'fn') decls.push(this.parseFn());
+      else if (t.type === 'IDENT' && t.value === 'import') this.parseImport();
+      else if (t.type === 'IDENT' && (t.value === 'entry' || t.value === 'event'))
+        throw this._err('模块内不允许 "' + t.value + '"（模块只提供函数 / 结构体）');
+      else throw this._err('顶层不认识 "' + t.value + '"');
+    }
+    return decls;
+  }
+
   parseImport() {
     this.expect('import');
+    const t = this.peek();
+    if (t.type === 'STR') {
+      // 文件级模块导入：import "name"（name 不带扩展名，对应 modules 里的 key）
+      this.next();
+      this.fileImports.push(t.value);
+      this.accept(';');
+      return;
+    }
     const name = this.next().value;
     if (!(name in BUILTIN_MODULES)) {
       throw this._err('未知模块 "' + name + '"（可选：core / math / str）');

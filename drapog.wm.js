@@ -2,7 +2,7 @@
  * @file        drapog.wm.js
  * @module      drapog/wm
  * @summary     窗口管理器（支持应用内容）
- * @version     0.5.0
+ * @version     0.6.0
  */
 
 export class WindowManager {
@@ -26,7 +26,9 @@ export class WindowManager {
     this.apps = [
       { id: 'finder',   letter: 'F', title: 'Finder' },
       { id: 'terminal', letter: '>', title: 'Terminal' },
+      { id: 'guidemo',  letter: '◆', title: 'DrapApp 示例' },
       { id: 'paint',    letter: '🎨', title: 'Paint' },
+      { id: 'hello',    letter: 'H', title: 'Hello' },
       { id: 'appmgr',   letter: '◆', title: '应用' },
       { id: 'edit',     letter: 'T', title: 'TextEdit' },
       { id: 'settings', letter: '⚙', title: 'Settings' },
@@ -414,6 +416,12 @@ export class WindowManager {
     // 若应用实现了 launch（如 DrapLang 应用需自建 VM 窗口），优先调用
     const impl = this.getApp(app.id);
     if (impl && typeof impl.launch === 'function') { impl.launch(this); return; }
+    // 无 WM 实现但注册表里有（DrapLang 应用：gui 交 WM、cli 跑终端）→ 统一经注册表启动
+    if (!impl && this.registry && this.registry.get(app.id)) {
+      this.registry.launch(app.id, { wm: this, vfs: this.vfs || null })
+        .catch(e => console.error('应用启动失败', app.id, e));
+      return;
+    }
 
     const existing = this.windows.find(w => w.appId === app.id && w.minimized);
     if (existing) { this.restoreWindow(existing.id); return; }

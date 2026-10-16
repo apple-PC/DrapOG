@@ -2,7 +2,7 @@
  * @file        System/Boot/cmd.js
  * @module      drapog/boot/cmd
  * @summary     CMD 模式引导（支持滚动 + 系统调用）
- * @version     0.8.0
+ * @version     0.9.0
  */
 
 import { VM } from '../../drapog.vm.js';
@@ -28,8 +28,15 @@ export function startCMD() {
     registry.addHost('settings', { name: '设置',     icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机', icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',     icon: '◆',  title: '应用' });
-    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui', file: '../app_gui.drap', baseUrl: import.meta.url });
-    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui', file: '../app_paint.drap', baseUrl: import.meta.url });
+    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
+      file: '../Apps/GuiDemo.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
+    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
+      file: '../Apps/Paint.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
+    registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
+      file: '../Apps/Hello.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
     registry.scan(vfs, 'System/Apps').catch(() => {});
     const state = {
       lines: [], input: '', cursor: 0,

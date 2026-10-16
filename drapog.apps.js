@@ -2,7 +2,7 @@
  * @file        drapog.apps.js
  * @module      drapog/apps
  * @summary     内置 GUI 应用（Finder / Terminal / TextEdit / Settings / About / AppMgr）
- * @version     1.0.0
+ * @version     1.1.0
  */
 
 import { makeLineWriter } from './drapog.stream.js';
@@ -676,10 +676,14 @@ export function createAppManagerApp({ registry, vfs }) {
         ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.font = '28px -apple-system, "Apple Color Emoji", sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(c.a.icon, c.x + c.w / 2, c.y + c.h / 2 - 10);
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillText(c.a.icon, c.x + c.w / 2, c.y + 30);
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
         ctx.font = '12px -apple-system, sans-serif';
-        ctx.fillText(c.a.name, c.x + c.w / 2, c.y + c.h - 18);
+        ctx.fillText(c.a.name, c.x + c.w / 2, c.y + c.h - 30);
+        const meta = (c.a.version ? 'v' + c.a.version : '') + (c.a.category ? ' · ' + c.a.category : '');
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.fillText(meta, c.x + c.w / 2, c.y + c.h - 14);
       }
     },
 

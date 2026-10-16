@@ -116,15 +116,8 @@ export const drapAppBridge = {
   },
 };
 
-// 启动一个 DrapLang 编写的 GUI 应用：编译源 → 建 VM+sys → 跑事件循环
-export function launchDrapApp(wm, vfs, source) {
-  let program;
-  try {
-    program = new DrapCC(source).compile();
-  } catch (err) {
-    console.error('DrapLang 应用编译失败', err);
-    return null;
-  }
+// 启动一个「已编译」的 DrapLang GUI 程序（program = {instructions, strings}）：建 VM+sys → 跑事件循环
+export function launchDrapAppProgram(wm, vfs, program) {
   const vm = new VM();
   vm.load(program);
   const sys = new DrapSYS({
@@ -144,6 +137,19 @@ export function launchDrapApp(wm, vfs, source) {
   return sys;
 }
 
+// 启动一个 DrapLang 编写的 GUI 应用：编译源 → 建 VM+sys → 跑事件循环
+// opts.modules: { name: source } —— 供 app 内的 `import "name"` 文件级模块解析
+export function launchDrapApp(wm, vfs, source, opts = {}) {
+  let program;
+  try {
+    program = new DrapCC(source, { modules: opts.modules || null }).compile();
+  } catch (err) {
+    console.error('DrapLang 应用编译失败', err);
+    return null;
+  }
+  return launchDrapAppProgram(wm, vfs, program);
+}
+
 // 从 URL 拉取 DrapLang 源码并启动（dock / 注册表 启动 gui 型 .app 用）
 export function launchDrapAppUrl(wm, vfs, url) {
   fetch(url)
@@ -152,16 +158,8 @@ export function launchDrapAppUrl(wm, vfs, url) {
     .catch(err => console.warn('drapp 加载失败（可忽略）', err));
 }
 
-// 运行一个 DrapLang 编写的 CLI 应用：编译源 → 建 VM+sys（无窗口）→ 跑完，输出收敛到 io.print
-// 适用于 .app 的 type:'cli' 入口（只用 term_print / term_read / fs_*，不调 GUI）。
-export async function runDrapCli(vfs, io, source) {
-  let program;
-  try {
-    program = new DrapCC(source).compile();
-  } catch (err) {
-    if (io && io.print) io.print('编译失败: ' + err.message);
-    return false;
-  }
+// 运行一个「已编译」的 DrapLang CLI 程序：建 VM+sys（无窗口）→ 跑完，输出收敛到 io.print
+export async function runDrapCliProgram(vfs, io, program) {
   const vm = new VM();
   vm.load(program);
   const w = makeLineWriter(l => { if (io && io.print) io.print(l); });
@@ -181,4 +179,18 @@ export async function runDrapCli(vfs, io, source) {
     if (io && io.print) io.print('运行错误: ' + err.message);
     return false;
   }
+}
+
+// 运行一个 DrapLang 编写的 CLI 应用：编译源 → 建 VM+sys（无窗口）→ 跑完，输出收敛到 io.print
+// 适用于 .app 的 type:'cli' 入口（只用 term_print / term_read / fs_*，不调 GUI）。
+// opts.modules: { name: source } —— 供 app 内的 `import "name"` 文件级模块解析
+export async function runDrapCli(vfs, io, source, opts = {}) {
+  let program;
+  try {
+    program = new DrapCC(source, { modules: opts.modules || null }).compile();
+  } catch (err) {
+    if (io && io.print) io.print('编译失败: ' + err.message);
+    return false;
+  }
+  return runDrapCliProgram(vfs, io, program);
 }

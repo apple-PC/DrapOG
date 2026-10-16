@@ -7,6 +7,7 @@
 import assert from 'assert';
 import { VFS } from './drapog.vfs.js';
 import { AppRegistry } from './drapog.registry.js';
+import { DrapCC } from './drapcc.js';
 
 let passed = 0;
 function ok(cond, msg) { assert(cond, msg); console.log('  ✓ ' + msg); passed++; }
@@ -80,6 +81,35 @@ async function main() {
   // 7) 未知 id
   const r6 = await registry.launch('nope', { wm: mockWm, vfs });
   ok(r6.error && /未知应用/.test(r6.error), 'launch 未知 id: 报错未知应用');
+
+  // 8) scan 跳过字段不全的 .app 包（缺 type / entry）
+  await vfs.write('System/Apps/Bad.app/Info.json', JSON.stringify({ id: 'bad', name: 'Bad' }));
+  const reg2 = new AppRegistry();
+  await reg2.scan(vfs, 'System/Apps');
+  ok(!reg2.get('bad'), 'scan: 字段不全的 .app 被跳过');
+  ok(reg2.get('hello') && reg2.get('guidemo'), 'scan: 合法 .app 仍被注册');
+
+  // 9) 元数据入库（entry 全路径 / 类型）
+  ok(registry.get('guidemo').entry === 'System/Apps/GuiDemo.app/main.drap', 'scan: 写入完整 entry 路径');
+  ok(registry.get('hello').type === 'cli', 'scan: 类型正确（cli）');
+
+  // 10) register / unregister（install / uninstall 用）
+  registry.register({ id: 'tmp', name: 'Tmp', icon: 'T', type: 'host' });
+  ok(registry.get('tmp') && registry.all().some(a => a.id === 'tmp'), 'register: 动态注册应用');
+  registry.unregister('tmp');
+  ok(!registry.get('tmp'), 'unregister: 动态注销应用');
+
+  // 11) 预编译 .dbyte 入口的 cli .app 可运行（工具链闭环：cc → pack → 运行）
+  const { pack } = await import('./drapog.dbyte.js');
+  const dbProgram = new DrapCC('entry fn main() -> i32 { term_print("dbyte-ok"); return 0 }').compile();
+  const dbBytes = pack(dbProgram);
+  await vfs.write('System/Apps/Db.app/Info.json', JSON.stringify({ id: 'dbapp', name: 'Db', icon: 'D', type: 'cli', entry: 'main.dbyte', version: '1.0' }));
+  await vfs.writeBytes('System/Apps/Db.app/main.dbyte', dbBytes);
+  const reg3 = new AppRegistry();
+  await reg3.scan(vfs, 'System/Apps');
+  const out2 = [];
+  const r7 = await reg3.launch('dbapp', { wm: null, vfs, io: { print: s => out2.push(s) } });
+  ok(r7.ok && out2.join('').includes('dbyte-ok'), 'launch cli(.dbyte): 预编译产物运行并输出 dbyte-ok');
 
   console.log('\n[L3/L4] 注册表与启动器验证：全部通过 ✓ (' + passed + ' 项)');
   process.exit(0);

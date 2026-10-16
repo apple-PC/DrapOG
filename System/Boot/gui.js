@@ -2,7 +2,7 @@
  * @file        System/Boot/gui.js
  * @module      drapog/boot/gui
  * @summary     GUI 模式引导（高清 + 内嵌应用）
- * @version     1.0.0
+ * @version     1.1.0
  */
 
 import { WindowManager } from '../../drapog.wm.js';
@@ -13,7 +13,7 @@ import {
   createEditApp, createSettingsApp, createAboutApp,
 } from '../../drapog.apps.js';
 import { DrapSYS } from '../../drapog.sys.js';
-import { drapAppBridge, launchDrapApp, launchDrapAppUrl } from '../../drapog.launcher.js';
+import { drapAppBridge } from '../../drapog.launcher.js';
 import { AppRegistry } from '../../drapog.registry.js';
 
 // 是否移动端（与 BIOS 菜单同一判据）
@@ -51,15 +51,26 @@ export function startGUI(opts = {}) {
 
     // 应用注册表（L4：整合 draplang 工具 + 制定 .app 格式）
     const registry = new AppRegistry();
+    wm.vfs = vfs;
+    wm.registry = registry;
+
     registry.addHost('finder',   { name: 'Finder',       icon: '📁', title: 'Finder' });
     registry.addHost('terminal', { name: 'Terminal',     icon: '>',  title: 'Terminal' });
     registry.addHost('edit',     { name: 'TextEdit',     icon: 'T',  title: 'TextEdit' });
     registry.addHost('settings', { name: '设置',         icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
-    // DrapLang 应用（内存模式下用 import.meta.url 拉源码，挂载真实磁盘时被 .app 包覆盖）
-    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui', file: '../app_gui.drap', baseUrl: import.meta.url });
-    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui', file: '../app_paint.drap', baseUrl: import.meta.url });
+    // DrapLang 应用（内存模式下用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 .app 包覆盖）
+    // .app/main.drap 是唯一真源（System/app_gui.drap / app_paint.drap 保留仅供旧测试）
+    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
+      file: '../Apps/GuiDemo.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
+    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
+      file: '../Apps/Paint.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
+    registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
+      file: '../Apps/Hello.app/main.drap', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
@@ -69,11 +80,6 @@ export function startGUI(opts = {}) {
     wm.registerApp('edit',     createEditApp({ vfs }));
     wm.registerApp('settings', createSettingsApp());
     wm.registerApp('about',    createAboutApp());
-
-    // Paint：用 DrapLang 编写的调色板 drapp，从 dock 启动（自建 VM 窗口）
-    wm.registerApp('paint', {
-      launch: (wm2) => launchDrapAppUrl(wm2, vfs, new URL('../app_paint.drap', import.meta.url)),
-    });
 
     // 应用管理助手：从注册表读取所有应用网格展示并启动
     wm.registerApp('appmgr', createAppManagerApp({ registry, vfs }));
