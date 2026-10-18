@@ -3,6 +3,6 @@
   "name": "DrapApp 示例",
   "icon": "◆",
   "type": "gui",
-  "entry": "main.drap",
+  "entry": "main.drapp",
   "version": "1.0"
 }

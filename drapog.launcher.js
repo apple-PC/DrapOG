@@ -159,7 +159,9 @@ export function launchDrapAppUrl(wm, vfs, url) {
 }
 
 // 运行一个「已编译」的 DrapLang CLI 程序：建 VM+sys（无窗口）→ 跑完，输出收敛到 io.print
-export async function runDrapCliProgram(vfs, io, program) {
+// argv：命令行参数数组（argv[0] 为程序名），注入 sys.argv 供应用读取
+// 返回 main 的返回值作为退出码（0 成功；运行异常返回 1）
+export async function runDrapCliProgram(vfs, io, program, argv = []) {
   const vm = new VM();
   vm.load(program);
   const w = makeLineWriter(l => { if (io && io.print) io.print(l); });
@@ -170,27 +172,29 @@ export async function runDrapCliProgram(vfs, io, program) {
     out: s => { for (const l of String(s).split('\n')) if (io && io.print) io.print(l); },
     onRead: io && typeof io.readLine === 'function' ? () => io.readLine() : null,
   });
+  sys.argv = argv.map(String);
   vm.sys = sys;
   try {
     await vm.run();
     w.flush();
-    return true;
+    return vm.regs[0] | 0;   // main 返回值即退出码
   } catch (err) {
     if (io && io.print) io.print('运行错误: ' + err.message);
-    return false;
+    return 1;
   }
 }
 
 // 运行一个 DrapLang 编写的 CLI 应用：编译源 → 建 VM+sys（无窗口）→ 跑完，输出收敛到 io.print
 // 适用于 .app 的 type:'cli' 入口（只用 term_print / term_read / fs_*，不调 GUI）。
 // opts.modules: { name: source } —— 供 app 内的 `import "name"` 文件级模块解析
+// opts.argv: 命令行参数数组
 export async function runDrapCli(vfs, io, source, opts = {}) {
   let program;
   try {
     program = new DrapCC(source, { modules: opts.modules || null }).compile();
   } catch (err) {
     if (io && io.print) io.print('编译失败: ' + err.message);
-    return false;
+    return 1;
   }
-  return runDrapCliProgram(vfs, io, program);
+  return runDrapCliProgram(vfs, io, program, opts.argv || []);
 }

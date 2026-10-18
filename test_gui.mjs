@@ -6,7 +6,7 @@ import { VM } from './drapog.vm.js';
 import { DrapSYS } from './drapog.sys.js';
 import { DrapCC } from './drapcc.js';
 
-const src = readFileSync(new URL('./System/app_gui.drap', import.meta.url), 'utf8');
+const src = readFileSync(new URL('./System/app_gui.drapp', import.meta.url), 'utf8');
 
 let failures = 0;
 function assert(cond, msg) {
@@ -15,7 +15,7 @@ function assert(cond, msg) {
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
 
-console.log('== 1. 编译 app_gui.drap ==');
+console.log('== 1. 编译 app_gui.drapp ==');
 const program = new DrapCC(src).compile();
 assert(Array.isArray(program.instructions) && program.instructions.length > 0, '编译成功，生成 ' + program.instructions.length + ' 条指令');
 

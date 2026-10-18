@@ -12,8 +12,8 @@
  *  .app 包格式（v1.1）：Name.app/ 目录
  *    Info.json（必填 id / name / type / entry；可选 version / icon / author / description /
  *              category / minVersion / permissions / modules）
- *    entry 指向入口源文件（.drap 源码，或 .dbyte 预编译产物）
- *    modules: 相对本 .app 目录的「兄弟 .drap 模块文件」基名数组（供 app 内 import "name"）
+ *    entry 指向入口源文件（.drapp 源码，或 .dbyte 预编译产物）
+ *    modules: 相对本 .app 目录的「兄弟 .drapp 模块文件」基名数组（供 app 内 import "name"）
  */
 
 import { launchDrapApp, launchDrapAppProgram, runDrapCli, runDrapCliProgram } from './drapog.launcher.js';
@@ -114,7 +114,7 @@ export class AppRegistry {
       const modules = {};
       if (entry.modules && entry.modules.length) {
         const base = entry.url.replace(/[^/]+$/, '');
-        for (const m of entry.modules) modules[m] = await (await fetch(base + m + '.drap')).text();
+        for (const m of entry.modules) modules[m] = await (await fetch(base + m + '.drapp')).text();
       }
       return { kind: 'drap', source, modules };
     }
@@ -128,7 +128,7 @@ export class AppRegistry {
       const modules = {};
       if (entry.modules && entry.modules.length) {
         const dir = entry.entry.replace(/[^/]+$/, '');
-        for (const m of entry.modules) modules[m] = await vfs.read(dir + m + '.drap');
+        for (const m of entry.modules) modules[m] = await vfs.read(dir + m + '.drapp');
       }
       return { kind: 'drap', source, modules };
     }
@@ -170,9 +170,12 @@ export class AppRegistry {
       catch (e) { return { error: '加载失败: ' + e.message }; }
       if (!r) return { error: '找不到 ' + (a.name || id) + ' 的源码' };
       const io = env.io || { print: (s) => console.log(s) };
-      if (r.kind === 'dbyte') await runDrapCliProgram(env.vfs, io, r.program);
-      else await runDrapCli(env.vfs, io, r.source, { modules: r.modules });
-      return { ok: true };
+      const argv = (env.argv || []).slice();
+      if (argv.length === 0) argv.push(a.id);   // argv[0] 默认程序名
+      let code;
+      if (r.kind === 'dbyte') code = await runDrapCliProgram(env.vfs, io, r.program, argv);
+      else code = await runDrapCli(env.vfs, io, r.source, { modules: r.modules, argv });
+      return { ok: true, code: code | 0 };
     }
 
     return { error: '未知的应用类型: ' + a.type };

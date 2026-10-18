@@ -10,7 +10,7 @@ import { DrapShell } from './drapog.shell.js';
 let passed = 0;
 function ok(cond, msg) { assert.ok(cond, msg); console.log('  ✓ ' + msg); passed++; }
 
-const helloSrc = readFileSync('System/Apps/Hello.app/main.drap', 'utf8');
+const helloSrc = readFileSync('System/Apps/Hello.app/main.drapp', 'utf8');
 const helloInfo = JSON.parse(readFileSync('System/Apps/Hello.app/Info.json', 'utf8'));
 
 async function main() {
@@ -19,7 +19,7 @@ async function main() {
   // 1) 注册表扫描 VFS 中的 .app 包并采集元数据
   const vfs = new VFS();
   await vfs.write('System/Apps/Hello.app/Info.json', JSON.stringify(helloInfo));
-  await vfs.write('System/Apps/Hello.app/main.drap', helloSrc);
+  await vfs.write('System/Apps/Hello.app/main.drapp', helloSrc);
   const registry = new AppRegistry();
   await registry.scan(vfs, 'System/Apps');
   const hello = registry.get('hello');
@@ -27,7 +27,7 @@ async function main() {
   ok(hello.type === 'cli', 'hello.type === cli');
   ok(hello.version === '1.0', 'hello.version === 1.0');
   ok(hello.category === 'tools', 'hello.category === tools');
-  ok(hello.entry === 'System/Apps/Hello.app/main.drap', 'hello.entry 指向 main.drap');
+  ok(hello.entry === 'System/Apps/Hello.app/main.drapp', 'hello.entry 指向 main.drapp');
 
   // 2) 运行 CLI 应用（经 VFS 解析，不走 fetch）
   const out = [];
@@ -35,8 +35,8 @@ async function main() {
   const r = await registry.launch('hello', { vfs, io });
   ok(r.ok, 'launch hello 成功');
   const text = out.join('\n');
-  ok(text.includes('你好，DrapOG'), 'CLI 输出含问候语');
-  ok(text.includes('7 的平方 = 49'), 'CLI 输出含计算结果 49');
+  ok(text.includes('程序名: hello'), 'CLI 输出含程序名');
+  ok(text.includes('演示 replace: a/b/c'), 'CLI 输出含 replace 演示');
 
   // 3) 预编译 .dbyte 入口解析
   const program = new DrapCC(helloSrc).compile();
@@ -51,7 +51,8 @@ async function main() {
   const io2 = { print: s => out2.push(s), clear() {}, readLine: async () => '' };
   const r2 = await reg2.launch('hello2', { vfs, io: io2 });
   ok(r2.ok, 'launch dbyte 入口成功');
-  ok(out2.join('\n').includes('你好，DrapOG'), 'dbyte 入口运行输出正确');
+  ok(out2.join('\n').includes('程序名: hello2'), 'dbyte 入口运行输出程序名');
+  ok(out2.join('\n').includes('演示 replace: a/b/c'), 'dbyte 入口运行含 replace 演示（验证 BUILTIN 序列化）');
 
   // 4) shell 应用管理命令（pack / apps / info / install / uninstall）
   const shellOut = [];
@@ -65,11 +66,11 @@ async function main() {
   });
   shell.cwd = '/Users/guest';
 
-  // 4a) pack：把一份 .drap 打包成 System/Apps/Widget.app
-  await vfs.write('/Users/guest/widget.drap', helloSrc);
-  await shell._cmdPack(['widget.drap', 'Widget']);
+  // 4a) pack：把一份 .drapp 打包成 System/Apps/Widget.app
+  await vfs.write('/Users/guest/widget.drapp', helloSrc);
+  await shell._cmdPack(['widget.drapp', 'Widget']);
   ok(await vfs.exists('System/Apps/Widget.app/Info.json'), 'pack 生成 Info.json');
-  ok(await vfs.exists('System/Apps/Widget.app/main.drap'), 'pack 生成 main.drap');
+  ok(await vfs.exists('System/Apps/Widget.app/main.drapp'), 'pack 生成 main.drapp');
   let info2 = JSON.parse(await vfs.read('System/Apps/Widget.app/Info.json'));
   ok(info2.id === 'Widget' && info2.type === 'cli', 'pack Info.json 字段正确');
 

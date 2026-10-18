@@ -3,7 +3,7 @@
   "name": "Hello",
   "icon": "H",
   "type": "cli",
-  "entry": "main.drap",
+  "entry": "main.drapp",
   "version": "1.0",
   "author": "DrapOG",
   "description": "DrapLang 编写的命令行示例应用（演示 term_print / 计算 / 字符串拼接）",

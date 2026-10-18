@@ -2,7 +2,7 @@
  * @file        drapog.vm.js
  * @module      drapog/vm
  * @summary     DrapVM 虚拟机（支持系统调用）
- * @version     0.7.0
+ * @version     0.8.0
  */
 
 import { unpack } from './drapog.dbyte.js';
@@ -13,6 +13,7 @@ import { unpack } from './drapog.dbyte.js';
 const BUILTIN_TABLE = {
   // —— core（自动导入，始终可用）——
   10: (a, vm) => { const n = parseInt(vm._getStr(a[0]), 10); return isNaN(n) ? 0 : n; }, // atoi
+  11: (a, vm) => vm.pushStr(String(Math.trunc(a[0]))),                                 // itoa
   // —— math（需 import math）——
   100: (a) => Math.abs(a[0]),
   101: (a) => Math.min(a[0], a[1]),
@@ -24,6 +25,10 @@ const BUILTIN_TABLE = {
   107: (a) => Math.round(a[0]),
   108: () => Math.floor(Math.random() * 32768),
   109: (a) => { const [x, lo, hi] = a; return x < lo ? lo : (x > hi ? hi : x); }, // clamp
+  110: (a) => Math.sin(a[0]),
+  111: (a) => Math.cos(a[0]),
+  112: (a) => Math.log(a[0]),
+  113: (a) => Math.exp(a[0]),
   // —— str（需 import str）——
   200: (a, vm) => vm.pushStr(vm._getStr(a[0]).toUpperCase()),
   201: (a, vm) => vm.pushStr(vm._getStr(a[0]).toLowerCase()),
@@ -33,6 +38,22 @@ const BUILTIN_TABLE = {
   205: (a, vm) => (vm._getStr(a[0]).startsWith(vm._getStr(a[1])) ? 1 : 0),
   206: (a, vm) => (vm._getStr(a[0]).endsWith(vm._getStr(a[1])) ? 1 : 0),
   207: (a, vm) => vm.pushStr(vm._getStr(a[0]).repeat(Math.max(0, a[1]))),            // repeat
+  208: (a, vm) => vm.pushStr(vm._getStr(a[0]).split(vm._getStr(a[1])).join(vm._getStr(a[2]))), // replace（全部匹配）
+  209: (a, vm) => {                                                              // join(arr, sep)
+    const arr = vm.heap[a[0]];
+    const sep = vm._getStr(a[1]);
+    if (!arr || arr.__type !== 'arr') return vm.pushStr('');
+    const parts = arr.items.map((it) => {
+      const o = vm.heap[it];
+      return (o && o.__type === 'str') ? o.value : String(it);
+    });
+    return vm.pushStr(parts.join(sep));
+  },
+  210: (a, vm) => {                                                              // charAt(s, i)
+    const s = vm._getStr(a[0]);
+    const i = a[1];
+    return vm.pushStr((i >= 0 && i < s.length) ? s[i] : '');
+  },
 };
 
 export class VM {

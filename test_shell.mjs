@@ -12,9 +12,9 @@ function assert(cond, msg) {
   else { fail++; console.log('  ✗ ' + msg); }
 }
 
-const src = readFileSync('./System/shell.drap', 'utf8');
+const src = readFileSync('./System/shell.drapp', 'utf8');
 const program = new DrapCC(src).compile();
-console.log('编译 shell.drap → ' + program.instructions.length + ' 条指令');
+console.log('编译 shell.drapp → ' + program.instructions.length + ' 条指令');
 
 const vfs = new VFS();
 const cwdTrace = [];

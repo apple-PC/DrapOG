@@ -1,0 +1,59 @@
+// Hello —— DrapLang CLI 示例应用（演示「编写软件」所需的核心接口）
+// 运行：run hello <任意参数...>  或  run hello --cat <文件>
+// 演示：命令行参数(args_*) / 文件读写(fs_*) / 标准库(itoa/replace/join/time_format)
+//       / 字符串拼接 / 数组 / 控制流
+
+import str
+
+// 把命令行参数拼成一个字符串（用 join 演示）
+fn join_args(start: i32) -> str {
+  let n = syscall args_count()
+  let out = ""
+  let i = start
+  while (i < n) {
+    out = out + syscall args_get(i)
+    i = i + 1
+  }
+  return out
+}
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  term_print("程序名: ")
+  term_println(syscall args_get(0))
+
+  // 演示：把参数 echo 出来（join + itoa）
+  if (n >= 2) {
+    let all = join_args(1)
+    term_print("参数(")
+    term_print(itoa(n - 1))
+    term_print("): ")
+    term_println(all)
+  } else {
+    term_println("提示: 可加参数，例如  run hello --cat readme.txt")
+  }
+
+  // 演示：读取并处理文件（--cat <path>）
+  if (n >= 3) {
+    let flag = syscall args_get(1)
+    if (flag == "--cat") {
+      let path = syscall args_get(2)
+      let content = syscall fs_read(path)
+      if (len(content) == 0) {
+        term_println("无法读取: " + path)
+        return 2
+      }
+      // 用 replace 去掉多余空行、用 time_format 打个时间戳
+      term_print("[")
+      term_print(syscall time_format(0))
+      term_print("] ")
+      term_println(replace(content, "\n\n", "\n"))
+      return 0
+    }
+  }
+
+  // 演示：标准库与字符串处理
+  term_print("演示 replace: ")
+  term_println(replace("a-b-c", "-", "/"))
+  return 0
+}

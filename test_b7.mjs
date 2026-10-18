@@ -146,12 +146,12 @@ console.log('== 4. fs_chdir 路径归一化 ==');
   assert(out === '/Users/guest/Documents\n', 'fs_chdir 归一化输出：' + JSON.stringify(out));
 }
 
-console.log('== 5. 回归：现有 hello.drap 仍能跑（struct/array/syscall） ==');
+console.log('== 5. 回归：现有 hello.drapp 仍能跑（struct/array/syscall） ==');
 {
-  const src = readFileSync(new URL('./Users/guest/hello.drap', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('./Users/guest/hello.drapp', import.meta.url), 'utf8');
   const { out } = await run(src);
   assert(out.includes('theme') || out.includes('配置文件') || out.length > 0,
-    'hello.drap 运行无异常，输出长度 ' + out.length);
+    'hello.drapp 运行无异常，输出长度 ' + out.length);
 }
 
 console.log('== 6. P0-4：无 syscall 的死循环应在 1e6 步内被掐死 ==');

@@ -49,8 +49,8 @@ export class DrapShell {
   async _ensureRepl() {
     if (this.replStarted) return;
     this.replStarted = true;
-    const src = await this.vfs.read('/System/shell.drap');
-    if (src === null) throw new Error('缺少 /System/shell.drap');
+    const src = await this.vfs.read('/System/shell.drapp');
+    if (src === null) throw new Error('缺少 /System/shell.drapp');
     const { DrapCC } = await import('./drapcc.js');
     const { VM } = await import('./drapog.vm.js');
     const program = new DrapCC(src).compile();
@@ -123,13 +123,16 @@ export class DrapShell {
     const name = args[0];
     if (!name) {
       const ids = this.registry.all().filter(a => a.id !== 'appmgr').map(a => a.id);
-      if (this.io.print) this.io.print('run: 用法 run <app>');
+      if (this.io.print) this.io.print('run: 用法 run <app> [参数...]');
       if (this.io.print) this.io.print('可用: ' + ids.join(' '));
       return;
     }
-    const r = await this.registry.launch(name, { wm: (this.io && this.io.wm) || null, io: this.io });
+    const app = this.registry.get(name);
+    const argv = [name, ...args.slice(1)];   // argv[0] = 程序名
+    const r = await this.registry.launch(name, { wm: (this.io && this.io.wm) || null, io: this.io, argv });
     if (r.error) { if (this.io.print) this.io.print(r.error); return; }
-    if (this.io.print) this.io.print('已启动 ' + name);
+    // CLI 应用自己产出输出，不重复提示；仅 GUI/host 提示已启动
+    if (app && app.type !== 'cli' && this.io.print) this.io.print('已启动 ' + name);
   }
 
   /* ============================================================
@@ -233,7 +236,7 @@ export class DrapShell {
     this.io.print('已卸载: ' + id);
   }
 
-  /* 打包：把单个 .drap 源文件封装成 System/Apps/<name>.app/{Info.json,main.drap} */
+  /* 打包：把单个 .drapp 源文件封装成 System/Apps/<name>.app/{Info.json,main.drapp} */
   async _cmdPack(args) {
     if (!this.registry) return this.io.print('注册表未就绪');
     let gui = false, input = null, name = null;
@@ -242,19 +245,19 @@ export class DrapShell {
       else if (!input) input = a;
       else if (!name) name = a;
     }
-    if (!input) return this.io.print('pack: 用法 pack <in.drap> [name] [-gui]');
+    if (!input) return this.io.print('pack: 用法 pack <in.drapp> [name] [-gui]');
     const inAbs = this.vfs.normalize(this.cwd, input);
     const src = await this.vfs.read(inAbs);
     if (src === null || src === undefined) return this.io.print('pack: 无法读取 ' + inAbs);
-    const base = name || inAbs.split('/').pop().replace(/\.drap$/, '');
+    const base = name || inAbs.split('/').pop().replace(/\.(drap|drapp)$/i, '');
     const appDir = 'System/Apps/' + base + '.app';
     const info = {
-      id: base, name: base, type: gui ? 'gui' : 'cli', entry: 'main.drap',
+      id: base, name: base, type: gui ? 'gui' : 'cli', entry: 'main.drapp',
       version: '1.0', icon: gui ? '◆' : '>',
       author: 'pack', description: '由 pack 命令打包', category: gui ? 'demo' : 'tools',
     };
     const okInfo = await this.vfs.write(appDir + '/Info.json', JSON.stringify(info, null, 2));
-    const okMain = await this.vfs.write(appDir + '/main.drap', src);
+    const okMain = await this.vfs.write(appDir + '/main.drapp', src);
     if (!okInfo || !okMain) return this.io.print('pack: 写入失败 ' + appDir);
     await this.registry.scan(this.vfs, 'System/Apps');
     this.io.print('已打包: ' + appDir + ' (type=' + info.type + ')');
@@ -369,7 +372,7 @@ export class DrapShell {
       '',
       '  编译/执行',
       '    run <app>         从注册表启动应用',
-      '    cc <in> [-o <out>]  编译 .drap → .dbyte',
+      '    cc <in> [-o <out>]  编译 .drapp → .dbyte',
       '    save <path>       编译内置 demo 保存为 .dbyte',
       '    load <path>       加载并运行 .dbyte',
       '    dump <path>       以十六进制显示 .dbyte',
@@ -379,7 +382,7 @@ export class DrapShell {
       '  应用管理（.app 包）',
       '    apps              列出所有已注册应用',
       '    info <id>         查看应用元数据',
-      '    pack <in.drap> [name] [-gui]  打包成 .app',
+      '    pack <in.drapp> [name] [-gui]  打包成 .app',
       '    install <src.app> 安装 .app 到 System/Apps',
       '    uninstall <id>    卸载应用',
       '',
@@ -514,11 +517,11 @@ export class DrapShell {
       if (args[i] === '-o') { output = args[++i]; }
       else if (!input) input = args[i];
     }
-    if (!input) return this.io.print('cc: 用法 cc <in.drap> [-o <out.dbyte>]');
+    if (!input) return this.io.print('cc: 用法 cc <in.drapp> [-o <out.dbyte>]');
     const inAbs = this.vfs.normalize(this.cwd, input);
     const outAbs = output
       ? this.vfs.normalize(this.cwd, output)
-      : inAbs.replace(/\.drap$/, '.dbyte');
+      : inAbs.replace(/\.(drap|drapp)$/i, '.dbyte');
     try {
       const src = await this.vfs.read(inAbs);
       if (src === null || src === undefined) {

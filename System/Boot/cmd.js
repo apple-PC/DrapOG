@@ -29,13 +29,13 @@ export function startCMD() {
     registry.addHost('about',    { name: '关于本机', icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',     icon: '◆',  title: '应用' });
     registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
-      file: '../Apps/GuiDemo.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/GuiDemo.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
     registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
-      file: '../Apps/Paint.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/Paint.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
-      file: '../Apps/Hello.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
     registry.scan(vfs, 'System/Apps').catch(() => {});
     const state = {

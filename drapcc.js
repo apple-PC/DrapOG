@@ -2,7 +2,7 @@
  * @file        drapcc.js
  * @module      drapog/drapcc
  * @summary     DrapLang 编译器（支持 syscall）
- * @version     0.9.0
+ * @version     1.0.0
  */
 
 /* ==================== 系统调用表 ==================== */
@@ -13,11 +13,18 @@ const SYS_TABLE = {
   'fs_ls':      0x13,
   'fs_mkdir':   0x14,
   'fs_rm':      0x15,
+  'fs_append':  0x18,
+  'fs_copy':    0x19,
+  'fs_move':    0x1a,
+  'fs_size':    0x1b,
+  'fs_isdir':   0x1c,
   'term_print': 0x30,
   'term_read':  0x31,
   'fs_chdir':   0x16,
   'fs_realpath':0x17,
   'time_now':   0x50,
+  'time_sleep': 0x54,
+  'time_format':0x55,
   'term_clear': 0x32,
   'term_exit':  0x33,
   'term_gui':   0x34,
@@ -44,6 +51,9 @@ const SYS_TABLE = {
   'win_label':      0x51,
   'win_input_get':  0x52,
   'win_input':      0x53,
+  // 进程参数（CLI 工具读取命令行）
+  'args_count': 0x60,
+  'args_get':   0x61,
 };
 
 /* event fn 名称 → 事件类型字符串（分发时比对 __et） */
@@ -62,6 +72,7 @@ const BUILTIN_MODULES = { core: true, math: true, str: true };
 const BUILTINS = {
   // core（自动，始终可用）
   atoi:   { mod: 'core', id: 10,  arity: 1 },
+  itoa:   { mod: 'core', id: 11,  arity: 1 },
   // math（需 import math）
   abs:    { mod: 'math', id: 100, arity: 1 },
   min:    { mod: 'math', id: 101, arity: 2 },
@@ -73,6 +84,10 @@ const BUILTINS = {
   round:  { mod: 'math', id: 107, arity: 1 },
   rand:   { mod: 'math', id: 108, arity: 0 },
   clamp:  { mod: 'math', id: 109, arity: 3 },
+  sin:    { mod: 'math', id: 110, arity: 1 },
+  cos:    { mod: 'math', id: 111, arity: 1 },
+  log:    { mod: 'math', id: 112, arity: 1 },
+  exp:    { mod: 'math', id: 113, arity: 1 },
   // str（需 import str）
   toUpper:    { mod: 'str', id: 200, arity: 1 },
   toLower:    { mod: 'str', id: 201, arity: 1 },
@@ -82,10 +97,13 @@ const BUILTINS = {
   startsWith: { mod: 'str', id: 205, arity: 2 },
   endsWith:   { mod: 'str', id: 206, arity: 2 },
   repeat:     { mod: 'str', id: 207, arity: 2 },
+  replace:    { mod: 'str', id: 208, arity: 3 },
+  join:       { mod: 'str', id: 209, arity: 2 },
+  charAt:     { mod: 'str', id: 210, arity: 2 },
 };
 
 /* 返回字符串（堆指针）的 builtin，inferType 据此判定 str 型 */
-const BUILTIN_RET_STR = new Set(['toUpper', 'toLower', 'trim', 'repeat']);
+const BUILTIN_RET_STR = new Set(['toUpper', 'toLower', 'trim', 'repeat', 'replace', 'join', 'charAt', 'itoa']);
 
 const SYS_RET = {
   'fs_read':    { kind: 'prim', name: 'str' },
@@ -94,11 +112,18 @@ const SYS_RET = {
   'fs_ls':      { kind: 'prim', name: 'str' },
   'fs_mkdir':   { kind: 'prim', name: 'i32' },
   'fs_rm':      { kind: 'prim', name: 'i32' },
+  'fs_append':  { kind: 'prim', name: 'i32' },
+  'fs_copy':    { kind: 'prim', name: 'i32' },
+  'fs_move':    { kind: 'prim', name: 'i32' },
+  'fs_size':    { kind: 'prim', name: 'i32' },
+  'fs_isdir':   { kind: 'prim', name: 'i32' },
   'term_print': { kind: 'prim', name: 'i32' },
   'term_read':  { kind: 'prim', name: 'str' },
   'fs_chdir':   { kind: 'prim', name: 'str' },
   'fs_realpath':{ kind: 'prim', name: 'str' },
   'time_now':   { kind: 'prim', name: 'i32' },
+  'time_sleep': { kind: 'prim', name: 'i32' },
+  'time_format':{ kind: 'prim', name: 'str' },
   'term_clear': { kind: 'prim', name: 'i32' },
   'term_exit':  { kind: 'prim', name: 'i32' },
   'term_gui':   { kind: 'prim', name: 'i32' },
@@ -123,6 +148,8 @@ const SYS_RET = {
   'win_label':      { kind: 'prim', name: 'i32' },
   'win_input_get':  { kind: 'prim', name: 'str' },
   'win_input':      { kind: 'prim', name: 'i32' },
+  'args_count': { kind: 'prim', name: 'i32' },
+  'args_get':    { kind: 'prim', name: 'str' },
 };
 
 const SYS_ARGS = {
@@ -132,11 +159,18 @@ const SYS_ARGS = {
   'fs_ls':      1,
   'fs_mkdir':   1,
   'fs_rm':      1,
+  'fs_append':  2,
+  'fs_copy':    2,
+  'fs_move':    2,
+  'fs_size':    1,
+  'fs_isdir':   1,
   'term_print': 1,
   'term_read':  0,
   'fs_chdir':   1,
   'fs_realpath':2,
   'time_now':   0,
+  'time_sleep': 1,
+  'time_format':1,
   'term_clear': 0,
   'term_exit':  0,
   'term_gui':   0,
@@ -161,6 +195,8 @@ const SYS_ARGS = {
   'win_label':      3,
   'win_input_get':  1,
   'win_input':      5,
+  'args_count': 0,
+  'args_get':   1,
 };
 
 class Scope {

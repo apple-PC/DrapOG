@@ -2,7 +2,7 @@
  * @file        drapog.sys.js
  * @module      drapog/sys
  * @summary     DrapSYS 系统调用分发器
- * @version     0.5.0
+ * @version     0.6.0
  */
 
 export class DrapSYS {
@@ -31,6 +31,8 @@ export class DrapSYS {
     this.drapWins = new Map(); // winId -> { queue, resolver, drawOps, style, title, dirty }
     this.curWinId = null;      // 当前绘制 / 输入目标窗口
 
+    this.argv = [];            // 命令行参数（argv[0] = 程序名），由启动器注入
+
     this.table = {
       0x10: this.fs_read.bind(this),
       0x11: this.fs_write.bind(this),
@@ -38,10 +40,17 @@ export class DrapSYS {
       0x13: this.fs_ls.bind(this),
       0x14: this.fs_mkdir.bind(this),
       0x15: this.fs_rm.bind(this),
+      0x18: this.fs_append.bind(this),
+      0x19: this.fs_copy.bind(this),
+      0x1a: this.fs_move.bind(this),
+      0x1b: this.fs_size.bind(this),
+      0x1c: this.fs_isdir.bind(this),
       0x30: this.term_print.bind(this),
       0x31: this.term_read.bind(this),
       0x16: this.fs_chdir.bind(this),
       0x50: this.time_now.bind(this),
+      0x54: this.time_sleep.bind(this),
+      0x55: this.time_format.bind(this),
       0x17: this.fs_realpath.bind(this),
       0x32: this.term_clear.bind(this),
       0x33: this.term_exit.bind(this),
@@ -68,6 +77,8 @@ export class DrapSYS {
       0x51: this.win_label.bind(this),
       0x52: this.win_input_get.bind(this),
       0x53: this.win_input.bind(this),
+      0x60: this.args_count.bind(this),
+      0x61: this.args_get.bind(this),
     };
   }
 
@@ -134,6 +145,53 @@ export class DrapSYS {
     return this.vm.pushStr(this.vfs.normalize(base, path));
   }
 
+  // 追加内容到文件（不存在则创建）
+  async fs_append(ptr_path, ptr_content) {
+    const path = this.vm.readStr(ptr_path);
+    const content = this.vm.readStr(ptr_content);
+    const existing = await this.vfs.read(path);
+    const base = existing === null ? '' : existing;
+    const ok = await this.vfs.write(path, base + content);
+    return ok ? 1 : 0;
+  }
+
+  // 复制文件（src 不存在返回 0）
+  async fs_copy(ptr_src, ptr_dst) {
+    const src = this.vm.readStr(ptr_src);
+    const dst = this.vm.readStr(ptr_dst);
+    const content = await this.vfs.read(src);
+    if (content === null) return 0;
+    const ok = await this.vfs.write(dst, content);
+    return ok ? 1 : 0;
+  }
+
+  // 移动 / 重命名文件
+  async fs_move(ptr_src, ptr_dst) {
+    const src = this.vm.readStr(ptr_src);
+    const dst = this.vm.readStr(ptr_dst);
+    const content = await this.vfs.read(src);
+    if (content === null) return 0;
+    const ok = await this.vfs.write(dst, content);
+    if (!ok) return 0;
+    await this.vfs.rm(src);
+    return 1;
+  }
+
+  // 文件大小（字节；不存在返回 -1）
+  async fs_size(ptr) {
+    const path = this.vm.readStr(ptr);
+    const content = await this.vfs.read(path);
+    if (content === null) return -1;
+    return content.length;
+  }
+
+  // 是否为目录（是返回 1，否则 0）
+  async fs_isdir(ptr) {
+    const path = this.vm.readStr(ptr);
+    const items = await this.vfs.ls(path);
+    return Array.isArray(items) ? 1 : 0;
+  }
+
   /* ---------- 终端 ---------- */
   // P0-2：统一走 vm.out，与编译器内置 term_print 同一条路径，避免双路分叉
   term_print(ptr) {
@@ -186,6 +244,35 @@ export class DrapSYS {
   /* ---------- 时间 ---------- */
   time_now() {
     return Math.floor(Date.now() / 1000);   // 秒级时间戳
+  }
+
+  // 休眠指定毫秒（异步让出，不阻塞 VM 步数预算）
+  async time_sleep(ms) {
+    const t = Math.max(0, Math.trunc(ms));
+    await new Promise(resolve => setTimeout(resolve, t));
+    return 0;
+  }
+
+  // 把秒级时间戳格式化为 "YYYY-MM-DD HH:MM:SS"（ts==0 用当前时间）
+  time_format(ts) {
+    let s = Math.trunc(ts);
+    if (!s) s = Math.floor(Date.now() / 1000);
+    const d = new Date(s * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    const out = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+                ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+    return this.vm.pushStr(out);
+  }
+
+  /* ---------- 进程参数（CLI 工具读取命令行） ---------- */
+  args_count() {
+    return this.argv.length;
+  }
+
+  // 取第 i 个参数（字符串）；越界返回空串
+  args_get(i) {
+    const idx = Math.trunc(i);
+    return this.vm.pushStr(idx >= 0 && idx < this.argv.length ? this.argv[idx] : '');
   }
 
   /* ---------- 窗口 / 绘制 / 输入（GUI 自举底层工具） ----------

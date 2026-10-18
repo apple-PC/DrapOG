@@ -6,7 +6,7 @@ import { VM } from './drapog.vm.js';
 import { DrapSYS } from './drapog.sys.js';
 import { DrapCC } from './drapcc.js';
 
-const src = readFileSync(new URL('./System/app_paint.drap', import.meta.url), 'utf8');
+const src = readFileSync(new URL('./System/app_paint.drapp', import.meta.url), 'utf8');
 
 let failures = 0;
 function assert(cond, msg) {
@@ -15,7 +15,7 @@ function assert(cond, msg) {
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
 
-console.log('== 1. 编译 app_paint.drap ==');
+console.log('== 1. 编译 app_paint.drapp ==');
 let program;
 try { program = new DrapCC(src).compile(); }
 catch (e) { console.log('  ✗ 编译失败: ' + e.message); process.exit(1); }

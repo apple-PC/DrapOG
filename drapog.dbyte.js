@@ -2,7 +2,7 @@
  * @file        drapog.dbyte.js
  * @module      drapog/dbyte
  * @summary     DBYTE 可执行文件格式
- * @version     0.4.0
+ * @version     0.5.0
  */
 
 export const MAGIC = 0x50415244;
@@ -30,6 +30,7 @@ export const OPCODE = {
   STRGET: 45,
   STRSUB: 46,
   STRSPLIT: 47,
+  BUILTIN: 48,
 };
 
 export const OPNAME = {};
@@ -84,6 +85,7 @@ export const ARG_SPEC = {
   STRGET: ['r', 'r', 'r'],
   STRSUB: ['r', 'r', 'r'],
   STRSPLIT: ['r', 'r', 'r'],
+  BUILTIN: ['i'],
 };
 
 export function pack(program) {

@@ -61,15 +61,15 @@ export function startGUI(opts = {}) {
     registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
     // DrapLang 应用（内存模式下用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 .app 包覆盖）
-    // .app/main.drap 是唯一真源（System/app_gui.drap / app_paint.drap 保留仅供旧测试）
+    // .app/main.drapp 是唯一真源（System/app_gui.drapp / app_paint.drapp 保留仅供旧测试）
     registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
-      file: '../Apps/GuiDemo.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/GuiDemo.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
     registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
-      file: '../Apps/Paint.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/Paint.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
-      file: '../Apps/Hello.app/main.drap', baseUrl: import.meta.url,
+      file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});

@@ -27,7 +27,7 @@
 |---|---|
 | DrapOG | 整个系统 |
 | Whetstone | BIOS 厂商（磨刀石） |
-| DrapLang | 系统源语言（.drap） |
+| DrapLang | 系统源语言（.drapp） |
 | DrapASM | 汇编语言（.dasm） |
 | DBYTE | 可执行文件格式（.dbyte） |
 | DrapCC | 编译器 |
@@ -104,9 +104,10 @@
 - DrapLang 事件处理程序（event fn）：声明式 `event fn on_paint/on_click/on_key/on_input/on_close`，编译器自动合成事件循环（内联 main 作共享 setup + 内联各处理器体），零运行时改动；System/app_gui.drap 改用此写法，test_event.mjs + test_gui.mjs 全绿
 - DrapLang 标准库（stdlib）+ 模块导入 + 编译器行号诊断：drapcc.js 加 `import math/str`（core 自动，math/str 需显式导入）；新增内建函数——core: `atoi`；math: `abs/min/max/sqrt/pow/floor/ceil/round/rand/clamp`；str: `toUpper/toLower/trim/contains/indexOf/startsWith/endsWith/repeat`（字符串型内建返回堆指针，inferType 已识别）；drapog.vm.js 加 `BUILTIN` 指令 + JS 实现表（复用 syscall 传参 ABI r1..r3+r6+r7）；token 带行号，解析错误输出 `行 N：...`；test_stdlib.mjs 28 项全绿，全套 9 文件回归无回归
 - **L3 统一启动器**：CMD 的 `run <app>` 与 GUI 的 dock / AppMgr 点击都收敛到同一个 `AppRegistry.launch(id, env)`；env = { wm, io }，按类型分派——host → `wm.launchApp`、gui → `launchDrapApp`、cli → `runDrapCli`。CMD 不再硬编码应用列表
-- **L4 应用格式 `.app` + 注册表**：引入 `drapog.registry.js`（AppRegistry，无 DOM 依赖）与 `drapog.launcher.js`（DrapLang 应用启动器，从 gui.js 抽出）；`.app` 包 = `Name.app/Info.json`（`{id,name,icon,type:cli|gui,entry,version}`）+ `main.drap`（DrapLang 源）。注册表支持三种登记：`addHost`（内建宿主应用）、`addDrap`（代码显式登记，内存模式用 `import.meta.url` 拉源码）、`addDrapVfs`（`scan(vfs,'System/Apps')` 扫描挂载盘上的 `.app` 包）。已内置 `System/Apps/GuiDemo.app`、`System/Apps/Paint.app` 两个 `.app` 包
+- **L4 应用格式 `.app` + 注册表**：引入 `drapog.registry.js`（AppRegistry，无 DOM 依赖）与 `drapog.launcher.js`（DrapLang 应用启动器，从 gui.js 抽出）；`.app` 包 = `Name.app/Info.json`（`{id,name,icon,type:cli|gui,entry,version}`）+ `main.drapp`（DrapLang 源）。注册表支持三种登记：`addHost`（内建宿主应用）、`addDrap`（代码显式登记，内存模式用 `import.meta.url` 拉源码）、`addDrapVfs`（`scan(vfs,'System/Apps')` 扫描挂载盘上的 `.app` 包）。已内置 `System/Apps/GuiDemo.app`、`System/Apps/Paint.app`、`System/Apps/Hello.app` 三个 `.app` 包
 - TextEdit 应用（createEditApp：读写 `/Users/guest/Documents/readme.txt`）、Settings 应用（createSettingsApp：软键盘开关）、About 应用（createAboutApp）现已接入 dock，修复了此前 dock 上 edit/settings/about 点击开空窗的 bug
-- **L4 完善（1.1.0）**：DrapLang 支持 `import "name"` 文件级模块（多文件 app 可拆模块，registry 按 `modules` 自动拉取兄弟 `.drap`）；`.app` 格式升级（`Info.json` 增 `author/description/category/minVersion/permissions/modules`，`entry` 支持 `.dbyte` 预编译入口，扫描校验必填字段）；Shell 新增应用管理命令 `apps`/`info`/`pack`/`install`/`uninstall`；WM `launchApp` 增加 registry 回退、dock 加入 guidemo/hello，使纯 DrapLang 应用从 dock 也能启动；新增 CLI 示例 `System/Apps/Hello.app`；`.app/main.drap` 成为唯一真源（旧 `System/app_gui.drap`/`app_paint.drap` 仅留作旧测试）。test_modules.mjs(8) + test_l4.mjs(19) + test_registry.mjs(16) 全绿
+- **L4 完善（1.1.0）**：DrapLang 支持 `import "name"` 文件级模块（多文件 app 可拆模块，registry 按 `modules` 自动拉取兄弟 `.drapp`）；`.app` 格式升级（`Info.json` 增 `author/description/category/minVersion/permissions/modules`，`entry` 支持 `.dbyte` 预编译入口，扫描校验必填字段）；Shell 新增应用管理命令 `apps`/`info`/`pack`/`install`/`uninstall`；WM `launchApp` 增加 registry 回退、dock 加入 guidemo/hello，使纯 DrapLang 应用从 dock 也能启动；新增 CLI 示例 `System/Apps/Hello.app`；`.app/main.drapp` 成为唯一真源（旧 `System/app_gui.drapp`/`app_paint.drapp` 仅留作旧测试）。test_modules.mjs(8) + test_l4.mjs(19) + test_registry.mjs(16) 全绿
+- **DrapLang 接口完善（v1.0 / 项目 1.2.0）**：为「让开发者编写实用工具/应用程序」补齐完整接口与基础工具——（1）**新增系统调用**：`fs_append/fs_copy/fs_move/fs_size/fs_isdir`（文件）、`time_sleep/time_format`（时间）、`args_count/args_get`（CLI 参数，argv[0] 默认程序名）；（2）**新增标准库内建**：`itoa`（core）、`replace/join/charAt`（str）、`sin/cos/log/exp`（math），`replace` 替换全部匹配；（3）**打通 argv 全链路**：registry→launcher→DrapSYS，CLI 退出码取 `main` 的 `i32` 返回值；（4）**源文件后缀 `.drap` → `.drapp`**：全量重命名 System/Boot/gui.js、cmd.js、shell.drapp、app_gui.drapp、app_paint.drapp、Users/guest/hello.drapp 及 System/Apps/{GuiDemo,Paint,Hello}.app/main.drapp，并同步所有引用（registry/shell/test）；（5）**编写《DrapLang 语言规范（v1.0）》**（DrapLang规范.md）：模型/词法/类型/声明/语句/表达式/标准库（core/math/str 全表）/系统调用（fs_/term_/time_/args_/win_ 全表含参数与返回值）/.app 格式/工具链命令/示例，即「编写软件」所需完整接口清单；（6）**修复 DBYTE 序列化漏掉 `BUILTIN` 指令的 bug**：预编译 `.dbyte` 产物使用内建函数会报「未知指令」，已在 drapog.dbyte.js 的 OPCODE/ARG_SPEC 补齐 `BUILTIN:48`（含 'i' 参数）。版本号：drapcc.js 1.0.0、drapog.sys.js 0.6.0、drapog.vm.js 0.8.0、drapog.dbyte.js 0.5.0。test_api.mjs 接口完整性验证（fs_/time_/builtins/argv 全绿）+ 全套 13 文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -728,21 +729,21 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - `drapog.launcher.js`（1.0.0 → 新增 program 重载）：`drapAppBridge`（render / onMouseDown / onKeyDown）、`launchDrapApp(wm,vfs,source,opts)`（opts.modules 支持文件级模块）、`launchDrapAppProgram(wm,vfs,program)`、`runDrapCli(vfs,io,source,opts)`、`runDrapCliProgram(vfs,io,program)`。
 
 ### .app 包格式（L4 v1.1）
-`Name.app/` 目录 = `Info.json` + `main.drap`（或 `main.dbyte` 预编译入口）。
-- `Info.json` 字段：必填 `id / name / type(gui|cli) / entry`；可选 `version / icon / author / description / category / minVersion / permissions / modules`（modules 为兄弟 `.drap` 基名数组，供 app 内 `import "name"` 文件级模块解析）。扫描时校验必填字段，缺字段/损坏的包跳过告警。
+`Name.app/` 目录 = `Info.json` + `main.drapp`（或 `main.dbyte` 预编译入口）。
+- `Info.json` 字段：必填 `id / name / type(gui|cli) / entry`；可选 `version / icon / author / description / category / minVersion / permissions / modules`（modules 为兄弟 `.drapp` 基名数组，供 app 内 `import "name"` 文件级模块解析）。扫描时校验必填字段，缺字段/损坏的包跳过告警。
 - 内置包：`System/Apps/GuiDemo.app`（guidemo, gui）、`System/Apps/Paint.app`（paint, gui）、`System/Apps/Hello.app`（hello, cli）。
-- **唯一真源**：gui.js / cmd.js 的 `addDrap` 现指向 `../Apps/<Name>.app/main.drap`（取代旧的 `System/app_gui.drap` / `app_paint.drap`，后者仅保留供旧测试）。挂载真实磁盘后 `scan('System/Apps')` 自动扩展发现盘上的 `.app` 包（fire-and-forget）。
+- **唯一真源**：gui.js / cmd.js 的 `addDrap` 现指向 `../Apps/<Name>.app/main.drapp`（取代旧的 `System/app_gui.drapp` / `app_paint.drapp`，后者仅保留供旧测试）。挂载真实磁盘后 `scan('System/Apps')` 自动扩展发现盘上的 `.app` 包（fire-and-forget）。
 - 预编译入口：entry 为 `.dbyte` 时，`resolve` 经 `drapog.dbyte.unpack` 还原 program，直接 `launchDrapAppProgram` / `runDrapCliProgram`，免去运行时编译。
 
 ### 接线
 - CMD（System/Boot/cmd.js 0.9.0）：构建与 gui 同款 registry（host + addDrap guidemo/paint/hello + scan），注入 `DrapShell({registry, wm:null})`；`run <app>` → `registry.launch(name, {wm:null, io})`。
-- Shell（drapog.shell.js 0.9.0）：新增 `run` 命令；新增应用管理命令 `apps` / `info <id>` / `pack <in.drap> [name] [-gui]` / `install <src.app>` / `uninstall <id>`（install/uninstall 经 `registry.scan` / `unregister` 同步注册表，VFS 用递归 `_copyTree` / `_rmTree`）。
+- Shell（drapog.shell.js 0.9.0）：新增 `run` 命令；新增应用管理命令 `apps` / `info <id>` / `pack <in.drapp> [name] [-gui]` / `install <src.app>` / `uninstall <id>`（install/uninstall 经 `registry.scan` / `unregister` 同步注册表，VFS 用递归 `_copyTree` / `_rmTree`）。
 - GUI（System/Boot/gui.js 1.1.0）：构建 registry 并注册全部宿主应用实现；`wm.vfs` / `wm.registry` 注入 WM；AppMgr 改为 `registry.all()` + `registry.launch`；dock 增加 `guidemo` / `hello` 图标，WM `launchApp` 增加「无 WM 实现但注册表有」的 registry 回退，使 dock 也能启动纯 DrapLang 应用；自动启动 `registry.launch('guidemo')`。
 - WM（drapog.wm.js 0.6.0）：`launchApp` 增加 registry 回退；dock 列表加入 guidemo/hello。
 - `drapog.apps.js` 1.1.0：AppMgr 重写（registry 驱动，单元格显示图标 + name + `v版本 · category`）；新增 createEditApp / createSettingsApp / createAboutApp。
 
 ### DrapLang 文件级模块（L4 配套，drapcc.js 0.9.0）
-`import "name"` 现支持「文件模块」：`DrapCC(source, { modules:{name:source} })` 在解析主源后 BFS 解析各模块源，合并其函数/结构体声明（模块内禁止 entry/event）。`runDrapCli` / `launchDrapApp` 透传 `opts.modules`，registry 的 `resolve` 按 `entry.modules` 自动拉取兄弟 `.drap`。测试 test_modules.mjs 8 项全绿（含嵌套 import、模块返回字符串、未声明模块报错）。
+`import "name"` 现支持「文件模块」：`DrapCC(source, { modules:{name:source} })` 在解析主源后 BFS 解析各模块源，合并其函数/结构体声明（模块内禁止 entry/event）。`runDrapCli` / `launchDrapApp` 透传 `opts.modules`，registry 的 `resolve` 按 `entry.modules` 自动拉取兄弟 `.drapp`。测试 test_modules.mjs 8 项全绿（含嵌套 import、模块返回字符串、未声明模块报错）。
 
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
@@ -752,8 +753,9 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 ### 验证
 - test_registry.mjs 16 项全绿：scan 发现 cli/gui 型 .app、必填字段校验跳过、元数据入库、register/unregister、launch host/gui/cli 三分支、无 wm 提示、未知 id 报错、dbyte 预编译入口。
 - test_modules.mjs 8 项全绿（文件级模块）。
-- test_l4.mjs 19 项全绿：scan 采元数据、CLI 运行、dbyte 入口、shell 的 pack/apps/info/install/uninstall。
-- 全套 12 个测试文件（b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
+- test_l4.mjs 20 项全绿：scan 采元数据、CLI 运行、dbyte 入口（验证 BUILTIN 序列化）、shell 的 pack/apps/info/install/uninstall。
+- test_api.mjs 接口完整性验证全绿：fs_append/fs_copy/fs_move/fs_size/fs_isdir、time_format/time_sleep、itoa/replace/join/charAt/sin/cos/log/exp、argv 全链路（退出码 42 + 参数透传）。
+- 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-14　当前版本：1.1.0
+最后更新：2026-10-18　当前版本：1.2.0

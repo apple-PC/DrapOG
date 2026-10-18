@@ -27,10 +27,10 @@ const CLI_SRC = `entry fn main() -> i32 {
 
 async function main() {
   const vfs = new VFS();
-  await vfs.write('System/Apps/Hello.app/Info.json', JSON.stringify({ id: 'hello', name: 'Hello', icon: 'H', type: 'cli', entry: 'main.drap', version: '1.0' }));
-  await vfs.write('System/Apps/Hello.app/main.drap', CLI_SRC);
-  await vfs.write('System/Apps/GuiDemo.app/Info.json', JSON.stringify({ id: 'guidemo', name: 'DrapApp 示例', icon: '◆', type: 'gui', entry: 'main.drap', version: '1.0' }));
-  await vfs.write('System/Apps/GuiDemo.app/main.drap', GUI_SRC);
+  await vfs.write('System/Apps/Hello.app/Info.json', JSON.stringify({ id: 'hello', name: 'Hello', icon: 'H', type: 'cli', entry: 'main.drapp', version: '1.0' }));
+  await vfs.write('System/Apps/Hello.app/main.drapp', CLI_SRC);
+  await vfs.write('System/Apps/GuiDemo.app/Info.json', JSON.stringify({ id: 'guidemo', name: 'DrapApp 示例', icon: '◆', type: 'gui', entry: 'main.drapp', version: '1.0' }));
+  await vfs.write('System/Apps/GuiDemo.app/main.drapp', GUI_SRC);
 
   const registry = new AppRegistry();
   registry.addHost('finder', { name: 'Finder', icon: '📁', title: 'Finder' });
@@ -90,7 +90,7 @@ async function main() {
   ok(reg2.get('hello') && reg2.get('guidemo'), 'scan: 合法 .app 仍被注册');
 
   // 9) 元数据入库（entry 全路径 / 类型）
-  ok(registry.get('guidemo').entry === 'System/Apps/GuiDemo.app/main.drap', 'scan: 写入完整 entry 路径');
+  ok(registry.get('guidemo').entry === 'System/Apps/GuiDemo.app/main.drapp', 'scan: 写入完整 entry 路径');
   ok(registry.get('hello').type === 'cli', 'scan: 类型正确（cli）');
 
   // 10) register / unregister（install / uninstall 用）
