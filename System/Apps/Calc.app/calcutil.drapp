@@ -1,0 +1,11 @@
+// calcutil —— 计算器的纯算术核心（被 Calc.app 这个 GUI 应用 import 复用）
+// 演示「app 调用 drapp」：gui 型 .app 通过 import 复用兄弟 .drapp 模块里的函数。
+// 约定：整数除法；除以零返回 0（避免运行时崩溃）。模块内只放 fn / struct，禁止 entry/event。
+
+fn apply(a: i32, o: str, b: i32) -> i32 {
+  if (o == "+") { return a + b }
+  if (o == "-") { return a - b }
+  if (o == "*") { return a * b }
+  if (o == "/") { if (b == 0) { return 0 } return a / b }
+  return b
+}

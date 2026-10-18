@@ -110,6 +110,7 @@
 - **DrapLang 接口完善（v1.0 / 项目 1.2.0）**：为「让开发者编写实用工具/应用程序」补齐完整接口与基础工具——（1）**新增系统调用**：`fs_append/fs_copy/fs_move/fs_size/fs_isdir`（文件）、`time_sleep/time_format`（时间）、`args_count/args_get`（CLI 参数，argv[0] 默认程序名）；（2）**新增标准库内建**：`itoa`（core）、`replace/join/charAt`（str）、`sin/cos/log/exp`（math），`replace` 替换全部匹配；（3）**打通 argv 全链路**：registry→launcher→DrapSYS，CLI 退出码取 `main` 的 `i32` 返回值；（4）**源文件后缀 `.drap` → `.drapp`**：全量重命名 System/Boot/gui.js、cmd.js、shell.drapp、app_gui.drapp、app_paint.drapp、Users/guest/hello.drapp 及 System/Apps/{GuiDemo,Paint,Hello}.app/main.drapp，并同步所有引用（registry/shell/test）；（5）**编写《DrapLang 语言规范（v1.0）》**（DrapLang规范.md）：模型/词法/类型/声明/语句/表达式/标准库（core/math/str 全表）/系统调用（fs_/term_/time_/args_/win_ 全表含参数与返回值）/.app 格式/工具链命令/示例，即「编写软件」所需完整接口清单；（6）**修复 DBYTE 序列化漏掉 `BUILTIN` 指令的 bug**：预编译 `.dbyte` 产物使用内建函数会报「未知指令」，已在 drapog.dbyte.js 的 OPCODE/ARG_SPEC 补齐 `BUILTIN:48`（含 'i' 参数）。版本号：drapcc.js 1.0.0、drapog.sys.js 0.6.0、drapog.vm.js 0.8.0、drapog.dbyte.js 0.5.0。test_api.mjs 接口完整性验证（fs_/time_/builtins/argv 全绿）+ 全套 14 文件回归无回归（新增 test_tools.mjs 验证四个 drapp 工具）
 - **DrapLang 实用工具 + 运行时契约（项目 1.3.0）**：按「drapp = cmd 里的程序、app = gui 里的程序、app 可调用 drapp」的契约，新增四个运行在 cmd 的 drapp 实用工具（均为 type:cli 的 .app 包，cmd 的 `scan('System/Apps')` 自动发现，可直接 `run <名>`）：`cat <文件> [-n]`（打印文件内容、-n 行号、自动去结尾换行避免空行）、`wc <文件>`（行/词/字符统计、逐字符扫描兼容 `\r\n`）、`grep <模式> <文件>`（打印命中行）、`ls [路径]`（列目录、目录名加 /）。全部基于标准接口实现（fs_read/fs_exists/fs_isdir/fs_ls、args_count/args_get、split/contains/charAt/itoa/replace、term_print/term_println）。运行时契约：drapp 在 cmd 调用 GUI 系统调用（win_*）时，DrapSYS 因无 WM 直接安全返回（`win_create` 无 `onWinCreate` 返 0、其余 `if (!st) return 0`），即「忽略 GUI、只跑功能」已内建保障、不崩溃。验证见 test_tools.mjs 14 项全绿
 - **第二批 drapp 实用工具（项目 1.4.0）**：再增四个 cmd 工具——`head <文件> [N=10]`（前 N 行）、`tail <文件> [N=10]`（后 N 行）、`sub <文件> <旧> <新>`（文件内查找替换、sed 风格、写回）、`tree [路径]`（递归目录树，首次演示 **DrapLang 函数递归** `walk(path, depth)` 自调用）。至此 cmd 下共有 8 个 drapp 工具（cat/wc/grep/ls/head/tail/sub/tree）。新增 test_tools2.mjs（head/tail/sub/tree 共 18 项断言全绿）；全套 15 个测试文件回归无回归
+- **L5 首个 GUI 应用：Calc 计算器（项目 1.5.0）**：正式进入 L5「GUI 使用」。新增 `System/Apps/Calc.app`（type:gui）——用 **win_gui 控件框架 + event fn** 编写的计算器（on_paint 声明标题/显示屏/4×4 按钮网格，on_click 驱动左结合整数状态机，除零保护）；并**首次落地「app 调用 drapp」**：Calc 这个 GUI 应用通过 `import "calcutil"` 复用兄弟模块 `calcutil.drapp` 的 `apply(a,o,b)`（算术核心，除零返回 0）。已接入 GUI：gui.js `addDrap('calc', {type:'gui', modules:['calcutil']})`、WM dock 加 🧮 Calc 图标、AppMgr 经 scan 自动展示。新增 test_calc.mjs（编译+import 模块+注入 click 读显示屏 label，覆盖 2+3 / 5×4 / 10-3-2 / 8÷0 / 多位 / clear / 停机 共 14 断言全绿）；全套 16 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -761,6 +762,12 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   - `Tree.app`：`tree [路径]` —— 递归打印目录树（演示 DrapLang 函数递归 `walk` 自调用）。
   - 源码均基于标准接口（fs_/args_/builtins/term_print/函数递归），示例兼作「如何用 DrapLang 写软件」的参考；验证见 test_tools.mjs + test_tools2.mjs（共 32 项断言全绿）。
 
+### L5：GUI 应用 —— Calc 计算器 + app 调用 drapp（项目 1.5.0）
+- **Calc 计算器**（`System/Apps/Calc.app`，type:gui）：完全用 DrapLang 编写，基于 win_gui 控件框架（win_label/win_button）+ event fn（on_paint/on_click/on_close）。左结合整数运算，除零返回 0。启动：桌面 dock 点 🧮 / AppMgr 里点开。
+- **app 调用 drapp（架构验证）**：Calc 的 `Info.json` 声明 `modules:["calcutil"]`，`main.drapp` 顶部 `import "calcutil"`，复用 `calcutil.drapp` 里的纯函数 `apply(a,o,b)`。gui 型 .app 经 registry resolve 拉取兄弟 `.drapp` 模块交给 DrapCC 合并——证明「gui 的 app 能调用 drapp 代码」。
+- **写 GUI 应用的范式**（供参考）：`entry fn main` 里 `win_create` + 声明共享状态变量（不 return，控制权交给编译器合成的事件循环）；`event fn on_paint` 画背景 + 声明控件；`event fn on_click(ev)` 用 `split(ev," ")[1]` 取控件 id 驱动逻辑 + `win_invalidate(win)` 重绘。注意：event 处理器与 setup 共享 main 局部作用域，但独立 `fn` 看不到这些局部——跨作用域只能用纯函数（放 `.drapp` 模块里正合适，即「app 调用 drapp」的用武之地）。
+- 验证：test_calc.mjs 14 断言全绿（VM 层注入 click、读显示屏 label 文本核对结果）。
+
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
 - cmd.js 顶层 `await registry.scan(...)` 置于非 async 流程导致 `SyntaxError` → 改 fire-and-forget `registry.scan(...).catch(()=>{})`。
@@ -774,4 +781,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.4.0
+最后更新：2026-10-18　当前版本：1.5.0

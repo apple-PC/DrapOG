@@ -71,6 +71,10 @@ export function startGUI(opts = {}) {
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
       file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
+    // L5：DrapLang 计算器（GUI 应用，import 复用 calcutil.drapp 模块 —— 演示「app 调用 drapp」）
+    registry.addDrap('calc',     { name: 'Calc 计算器',  icon: '🧮', type: 'gui',
+      file: '../Apps/Calc.app/main.drapp', baseUrl: import.meta.url, modules: ['calcutil'],
+      version: '1.0', author: 'DrapOG', description: 'DrapLang 计算器（win_gui + import calcutil）', category: 'utilities' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 

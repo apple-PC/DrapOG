@@ -29,6 +29,7 @@ export class WindowManager {
       { id: 'guidemo',  letter: '◆', title: 'DrapApp 示例' },
       { id: 'paint',    letter: '🎨', title: 'Paint' },
       { id: 'hello',    letter: 'H', title: 'Hello' },
+      { id: 'calc',     letter: '🧮', title: 'Calc' },
       { id: 'appmgr',   letter: '◆', title: '应用' },
       { id: 'edit',     letter: 'T', title: 'TextEdit' },
       { id: 'settings', letter: '⚙', title: 'Settings' },
