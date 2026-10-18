@@ -30,6 +30,7 @@ export class WindowManager {
       { id: 'paint',    letter: '🎨', title: 'Paint' },
       { id: 'hello',    letter: 'H', title: 'Hello' },
       { id: 'calc',     letter: '🧮', title: 'Calc' },
+      { id: 'conv',     letter: '🔟', title: 'Conv' },
       { id: 'appmgr',   letter: '◆', title: '应用' },
       { id: 'edit',     letter: 'T', title: 'TextEdit' },
       { id: 'settings', letter: '⚙', title: 'Settings' },

@@ -112,6 +112,7 @@
 - **第二批 drapp 实用工具（项目 1.4.0）**：再增四个 cmd 工具——`head <文件> [N=10]`（前 N 行）、`tail <文件> [N=10]`（后 N 行）、`sub <文件> <旧> <新>`（文件内查找替换、sed 风格、写回）、`tree [路径]`（递归目录树，首次演示 **DrapLang 函数递归** `walk(path, depth)` 自调用）。至此 cmd 下共有 8 个 drapp 工具（cat/wc/grep/ls/head/tail/sub/tree）。新增 test_tools2.mjs（head/tail/sub/tree 共 18 项断言全绿）；全套 15 个测试文件回归无回归
 - **L5 首个 GUI 应用：Calc 计算器（项目 1.5.0）**：正式进入 L5「GUI 使用」。新增 `System/Apps/Calc.app`（type:gui）——用 **win_gui 控件框架 + event fn** 编写的计算器（on_paint 声明标题/显示屏/4×4 按钮网格，on_click 驱动左结合整数状态机，除零保护）；并**首次落地「app 调用 drapp」**：Calc 这个 GUI 应用通过 `import "calcutil"` 复用兄弟模块 `calcutil.drapp` 的 `apply(a,o,b)`（算术核心，除零返回 0）。已接入 GUI：gui.js `addDrap('calc', {type:'gui', modules:['calcutil']})`、WM dock 加 🧮 Calc 图标、AppMgr 经 scan 自动展示。新增 test_calc.mjs（编译+import 模块+注入 click 读显示屏 label，覆盖 2+3 / 5×4 / 10-3-2 / 8÷0 / 多位 / clear / 停机 共 14 断言全绿）；全套 16 个测试文件回归无回归
 - **BIOS Setup 固件设置（项目 1.6.0）**：实现启动菜单里原本「未实现」的 BIOS Setup。新增 `System/BIOS/setup.js`——canvas 风格固件设置界面（↑↓ 选择 / ←→ 调整 / Enter 确认 / F10 保存并退出 / Esc 不保存退出）。可配置：**启动模式**（自动按设备 / 强制 CMD / 强制 GUI）、**菜单倒计时**（0–30 秒，0=一直等待）、恢复默认。因 BIOS 运行在 VFS 挂载之前，设置持久化到 **localStorage（相当于 CMOS/NVRAM，键 `drapog.bios.cmos`）**；`menu.js` 改为读取该设置决定默认启动项与倒计时（倒计时 0 则关闭自动启动、等待用户），Setup 退出后重显菜单。新增 test_bios.mjs（mock 浏览器环境，纯逻辑 + showSetup 交互共 18 断言全绿）；全套 17 个测试文件回归无回归
+- **L5 GUI 应用：Conv 进制转换器（项目 1.7.0）**：再增一个 GUI 应用 `System/Apps/Conv.app`（type:gui）——输入十进制数，点按钮转二/八/十六进制。**又一次「app 调用 drapp」**：`import "baseconv"` 复用 `baseconv.drapp` 的 `toBase(n, base)`（反复取余构串，整数精确，含 0/负数处理）。on_paint 声明输入框 + 结果 + 三个中文按钮，on_click 读输入→atoi→toBase→win_invalidate 重绘。已接入 dock/gui.js。新增 test_conv.mjs（setInputValue 设输入 + 注入 click + 读结果 label，7 断言全绿）；全套 18 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -789,4 +790,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.6.0
+最后更新：2026-10-18　当前版本：1.7.0

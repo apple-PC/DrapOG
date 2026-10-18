@@ -1,0 +1,12 @@
+{
+  "id": "conv",
+  "name": "Conv 进制转换",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "🔟",
+  "author": "DrapOG",
+  "description": "十进制转二/八/十六进制（win_gui + import baseconv 模块）",
+  "category": "utilities",
+  "modules": ["baseconv"]
+}

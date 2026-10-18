@@ -1,0 +1,42 @@
+// Conv —— 进制转换器（L5：win_gui 控件框架 + event fn 编写的 GUI 应用）
+// 演示「app 调用 drapp」：本 GUI 应用 import 兄弟模块 baseconv.drapp 的 toBase()。
+//   on_paint  标题 + 输入框 + 结果 + 三个转换按钮
+//   on_click  读输入值 → atoi → toBase(v, base) → 更新结果并重绘
+//   on_close  关闭窗口
+import "baseconv"
+
+entry fn main() -> i32 {
+    let win = syscall win_create("进制转换", 320, 240)
+    let result = "—"
+    let base = 10
+}
+
+event fn on_paint() {
+    syscall win_set_color(24, 26, 32)
+    syscall win_fill_rect(0, 0, 320, 240)
+    syscall win_set_color(230, 230, 230)
+    syscall win_label(16, 16, "输入十进制数，点按钮转换")
+    syscall win_input("val", 16, 44, 240, 32)
+    syscall win_label(16, 88, "结果(" + itoa(base) + " 进制): " + result)
+    syscall win_button("二进制", 16, 124, 88, 40)
+    syscall win_button("八进制", 112, 124, 88, 40)
+    syscall win_button("十六进制", 208, 124, 88, 40)
+    syscall win_set_color(120, 120, 120)
+    syscall win_label(16, 180, "Powered by baseconv.drapp")
+}
+
+event fn on_click(ev: str) {
+    let id = split(ev, " ")[1]
+    let v = atoi(syscall win_input_get("val"))
+    if (id == "二进制") { base = 2
+      result = toBase(v, 2) }
+    else if (id == "八进制") { base = 8
+      result = toBase(v, 8) }
+    else if (id == "十六进制") { base = 16
+      result = toBase(v, 16) }
+    syscall win_invalidate(win)
+}
+
+event fn on_close() {
+    return 0
+}

@@ -75,6 +75,10 @@ export function startGUI(opts = {}) {
     registry.addDrap('calc',     { name: 'Calc 计算器',  icon: '🧮', type: 'gui',
       file: '../Apps/Calc.app/main.drapp', baseUrl: import.meta.url, modules: ['calcutil'],
       version: '1.0', author: 'DrapOG', description: 'DrapLang 计算器（win_gui + import calcutil）', category: 'utilities' });
+    // L5：进制转换器（GUI 应用，import 复用 baseconv.drapp 模块 —— app 调用 drapp）
+    registry.addDrap('conv',     { name: 'Conv 进制转换', icon: '🔟', type: 'gui',
+      file: '../Apps/Conv.app/main.drapp', baseUrl: import.meta.url, modules: ['baseconv'],
+      version: '1.0', author: 'DrapOG', description: '十进制转二/八/十六进制（win_gui + import baseconv）', category: 'utilities' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
