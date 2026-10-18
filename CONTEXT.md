@@ -111,6 +111,7 @@
 - **DrapLang 实用工具 + 运行时契约（项目 1.3.0）**：按「drapp = cmd 里的程序、app = gui 里的程序、app 可调用 drapp」的契约，新增四个运行在 cmd 的 drapp 实用工具（均为 type:cli 的 .app 包，cmd 的 `scan('System/Apps')` 自动发现，可直接 `run <名>`）：`cat <文件> [-n]`（打印文件内容、-n 行号、自动去结尾换行避免空行）、`wc <文件>`（行/词/字符统计、逐字符扫描兼容 `\r\n`）、`grep <模式> <文件>`（打印命中行）、`ls [路径]`（列目录、目录名加 /）。全部基于标准接口实现（fs_read/fs_exists/fs_isdir/fs_ls、args_count/args_get、split/contains/charAt/itoa/replace、term_print/term_println）。运行时契约：drapp 在 cmd 调用 GUI 系统调用（win_*）时，DrapSYS 因无 WM 直接安全返回（`win_create` 无 `onWinCreate` 返 0、其余 `if (!st) return 0`），即「忽略 GUI、只跑功能」已内建保障、不崩溃。验证见 test_tools.mjs 14 项全绿
 - **第二批 drapp 实用工具（项目 1.4.0）**：再增四个 cmd 工具——`head <文件> [N=10]`（前 N 行）、`tail <文件> [N=10]`（后 N 行）、`sub <文件> <旧> <新>`（文件内查找替换、sed 风格、写回）、`tree [路径]`（递归目录树，首次演示 **DrapLang 函数递归** `walk(path, depth)` 自调用）。至此 cmd 下共有 8 个 drapp 工具（cat/wc/grep/ls/head/tail/sub/tree）。新增 test_tools2.mjs（head/tail/sub/tree 共 18 项断言全绿）；全套 15 个测试文件回归无回归
 - **L5 首个 GUI 应用：Calc 计算器（项目 1.5.0）**：正式进入 L5「GUI 使用」。新增 `System/Apps/Calc.app`（type:gui）——用 **win_gui 控件框架 + event fn** 编写的计算器（on_paint 声明标题/显示屏/4×4 按钮网格，on_click 驱动左结合整数状态机，除零保护）；并**首次落地「app 调用 drapp」**：Calc 这个 GUI 应用通过 `import "calcutil"` 复用兄弟模块 `calcutil.drapp` 的 `apply(a,o,b)`（算术核心，除零返回 0）。已接入 GUI：gui.js `addDrap('calc', {type:'gui', modules:['calcutil']})`、WM dock 加 🧮 Calc 图标、AppMgr 经 scan 自动展示。新增 test_calc.mjs（编译+import 模块+注入 click 读显示屏 label，覆盖 2+3 / 5×4 / 10-3-2 / 8÷0 / 多位 / clear / 停机 共 14 断言全绿）；全套 16 个测试文件回归无回归
+- **BIOS Setup 固件设置（项目 1.6.0）**：实现启动菜单里原本「未实现」的 BIOS Setup。新增 `System/BIOS/setup.js`——canvas 风格固件设置界面（↑↓ 选择 / ←→ 调整 / Enter 确认 / F10 保存并退出 / Esc 不保存退出）。可配置：**启动模式**（自动按设备 / 强制 CMD / 强制 GUI）、**菜单倒计时**（0–30 秒，0=一直等待）、恢复默认。因 BIOS 运行在 VFS 挂载之前，设置持久化到 **localStorage（相当于 CMOS/NVRAM，键 `drapog.bios.cmos`）**；`menu.js` 改为读取该设置决定默认启动项与倒计时（倒计时 0 则关闭自动启动、等待用户），Setup 退出后重显菜单。新增 test_bios.mjs（mock 浏览器环境，纯逻辑 + showSetup 交互共 18 断言全绿）；全套 17 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -768,6 +769,13 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **写 GUI 应用的范式**（供参考）：`entry fn main` 里 `win_create` + 声明共享状态变量（不 return，控制权交给编译器合成的事件循环）；`event fn on_paint` 画背景 + 声明控件；`event fn on_click(ev)` 用 `split(ev," ")[1]` 取控件 id 驱动逻辑 + `win_invalidate(win)` 重绘。注意：event 处理器与 setup 共享 main 局部作用域，但独立 `fn` 看不到这些局部——跨作用域只能用纯函数（放 `.drapp` 模块里正合适，即「app 调用 drapp」的用武之地）。
 - 验证：test_calc.mjs 14 断言全绿（VM 层注入 click、读显示屏 label 文本核对结果）。
 
+### BIOS Setup 固件设置（项目 1.6.0）
+- **入口**：`System/BIOS/bios.js`（splash → POST → menu）；`menu.js` 第 3 项「BIOS Setup」原为占位，现调用 `setup.js` 的 `showSetup()`，退出后重显启动菜单。
+- **设置项**：启动模式（auto/cmd/gui）、菜单倒计时（0–30 秒，0=一直等待）、恢复默认。F10 保存并退出、Esc 不保存退出。
+- **持久化**：localStorage 键 `drapog.bios.cmos`（BIOS 先于 VFS 运行，故用浏览器存储模拟 CMOS/NVRAM）。`loadBiosSettings/saveBiosSettings/normalizeSettings` 均做清洗与边界约束；损坏 JSON 回退默认。
+- **联动**：`menu.js` 用 `loadBiosSettings()` 决定默认选中项（cmd→CMD、gui→GUI、auto→按设备检测）与倒计时；倒计时 0 时关闭自动启动计时器。
+- 验证：test_bios.mjs（纯逻辑 + showSetup 交互，mock window/document/localStorage/canvas）18 断言全绿。
+
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
 - cmd.js 顶层 `await registry.scan(...)` 置于非 async 流程导致 `SyntaxError` → 改 fire-and-forget `registry.scan(...).catch(()=>{})`。
@@ -781,4 +789,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.5.0
+最后更新：2026-10-18　当前版本：1.6.0

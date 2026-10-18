@@ -1,9 +1,11 @@
 /**
  * @file        System/BIOS/menu.js
  * @module      drapog/bios/menu
- * @summary     启动菜单
- * @version     0.2.0
+ * @summary     启动菜单（读取 BIOS 设置：默认启动项 + 倒计时；可进入 BIOS Setup）
+ * @version     0.3.0
  */
+
+import { loadBiosSettings } from './setup.js';
 
 const screen = document.getElementById('screen');
 
@@ -35,10 +37,14 @@ export function showBootMenu() {
       { key: '3', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
     ];
 
-    // 设备感知默认：电脑（有鼠标）默认进 CMD，手机（触控）默认进 GUI
+    // 读取 BIOS 设置（CMOS）：决定默认启动项与倒计时
+    const settings = loadBiosSettings();
     const mobile = isMobileDevice();
-    let selected = mobile ? 1 : 0;   // 0=CMD, 1=GUI
-    let countdown = 5;
+    let selected = settings.bootMode === 'cmd' ? 0
+                 : settings.bootMode === 'gui' ? 1
+                 : (mobile ? 1 : 0);
+    const initialCountdown = settings.timeout;   // 0 = 一直等待
+    let countdown = initialCountdown;
 
     function draw() {
       ctx.fillStyle = '#000';
@@ -57,10 +63,17 @@ export function showBootMenu() {
 
       ctx.fillStyle = '#666';
       ctx.font = '14px Consolas, monospace';
-      ctx.fillText(`自动启动倒计时: ${countdown} 秒`, x, y);
+      if (countdown > 0) {
+        ctx.fillText(`自动启动倒计时: ${countdown} 秒`, x, y);
+      } else {
+        ctx.fillText('自动启动: 关闭（↑↓ 选择，Enter 确认）', x, y);
+      }
       y += 22;
       ctx.fillStyle = '#4a9';
-      ctx.fillText(`自动进入: ${items[selected].label}（${mobile ? '检测到手机/触控' : '检测到电脑/鼠标'}）`, x, y);
+      const reason = settings.bootMode === 'auto'
+        ? (mobile ? '检测到手机/触控' : '检测到电脑/鼠标')
+        : `BIOS 设定: ${settings.bootMode.toUpperCase()}`;
+      ctx.fillText(`自动进入: ${items[selected].label}（${reason}）`, x, y);
       y += 34;
 
       for (let i = 0; i < items.length; i++) {
@@ -101,24 +114,22 @@ export function showBootMenu() {
       } else if (it.action === 'gui') {
         import('../Boot/gui.js').then(m => m.startGUI()).then(resolve).catch(showFatal);
       } else {
-        // Setup 暂时不做
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, screen.width, screen.height);
-        ctx.fillStyle = '#888';
-        ctx.font = '14px Consolas, monospace';
-        ctx.fillText('BIOS Setup 未实现（v0.1）', 60, 80);
-        setTimeout(() => { cleanup(); resolve(); showBootMenu(); }, 1000);
+        // BIOS Setup：打开设置界面，退出后重显启动菜单（设置可能已变，重新读取）
+        import('./setup.js')
+          .then(m => m.showSetup())
+          .then(() => showBootMenu())
+          .catch(() => showBootMenu());
       }
     }
 
     function onKey(e) {
       if (e.key === 'ArrowDown') {
         selected = (selected + 1) % items.length;
-        countdown = 5;
+        countdown = initialCountdown;
         draw();
       } else if (e.key === 'ArrowUp') {
         selected = (selected - 1 + items.length) % items.length;
-        countdown = 5;
+        countdown = initialCountdown;
         draw();
       } else if (e.key === 'Enter') {
         choose(selected);
@@ -129,18 +140,21 @@ export function showBootMenu() {
       }
     }
 
-    const timer = setInterval(() => {
-      countdown--;
-      if (countdown <= 0) {
-        clearInterval(timer);
-        choose(selected);
-      } else {
-        draw();
-      }
-    }, 1000);
+    let timer = null;
+    if (countdown > 0) {
+      timer = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(timer);
+          choose(selected);
+        } else {
+          draw();
+        }
+      }, 1000);
+    }
 
     function cleanup() {
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       window.removeEventListener('keydown', onKey);
       window.__drapog_redraw = null;
     }
