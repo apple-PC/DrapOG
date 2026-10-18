@@ -130,6 +130,14 @@
   - Windows 控件重叠：方形 min/max/close 边长 26 > 间距 20 相互重叠；间距提到 26、边长降到 22。
   - 主菜单：macOS 左上角 Apple 菜单（ 关于本机 / 系统设置... / 锁定屏幕 / 重新启动... / 关机...）；Windows 任务栏 Start 开「开始菜单」（应用网格 + 锁定/注销/重启/关机）。Start 不再与 Ap 重复打开 AppMgr。新增锁屏/关机覆盖层与电源动作（restart=location.reload；lock/logout=锁屏；shutdown=关机屏 + 开机键）。菜单/覆盖层逻辑可在 node 下单测（hitMenu / runMenuAction / appleMenuLayout / startMenuLayout）。
   - 新增 test_theme.mjs 主菜单断言（Apple 菜单逐项、开始菜单电源行/网格、锁/注销/关机）；全套 20 个测试文件回归无回归
+- **桌面功能批量（项目 1.9.0）**：
+  - **主题文件格式**：新增 `System/Themes/{macos,windows}.json` 作为主题规范（控件位置/样式、顶/底栏、壁纸渐变、window 配色）；gui.js 启动时 fetch 合并进 `wm.T`，应用可读 `wm.T.window.*` 适配主题。
+  - **右键上下文菜单**：WM 加 `onContextMenu`（contextmenu 事件）——桌面右键=新建文件夹/新建文本/刷新/个性化；窗口右键委托应用（`app.contextMenu`）。动作支持字符串（WM 全局）或函数（应用自定义，如 Finder 打开/移到废纸篓）。
+  - **设置分级菜单**：重写 createSettingsApp——侧栏 个性化/账户/通用/关于；个性化一键切 macOS/Windows 主题（`wm.setTheme`）；通用含软键盘开关。
+  - **Finder 增强**：删除改「移到废纸篓」；新增右键菜单（打开/移到废纸篓/新建/刷新）；支持 `openFinderAt(path)` 初始路径打开（此电脑双击用）。
+  - **TextEdit**：新增可编辑路径栏（改路径→打开/保存 = 打开/另存为）。
+  - **废纸篓/回收站 + 此电脑**：新增 Trash 应用（还原/清空）与此电脑应用（卷列表，双击 openFinderAt）；删除=移入 `/Library/Trash`（递归、重名加序号、可还原/清空）。接入 dock/任务栏/AppMgr。
+  - 新增 test_trash.mjs（14 断言）+ test_theme.mjs 增右键菜单/主题合并断言（47 项）；全套 21 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -807,4 +815,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.8.2
+最后更新：2026-10-18　当前版本：1.9.0

@@ -1,6 +1,7 @@
 // test_theme.mjs —— 验证主题系统：统一图标(appIcon) + normalizeTheme +
 //   WM 两套主题布局（工作区/控件位置/任务栏）+ shell「gui <theme>」传参
 import assert from 'assert';
+import { VFS } from './drapog.vfs.js';
 
 // 浏览器环境 mock（WM 只用 canvas.getContext + window.SCR_W/H；布局方法不真正渲染）
 globalThis.window = { SCR_W: 1000, SCR_H: 700 };
@@ -112,6 +113,45 @@ console.log('== 主菜单：Windows 开始菜单 ==');
   ok(win.hitMenu(L.x - 5, L.y - 5) === null, '菜单外点击 → null（关闭）');
 }
 
+console.log('== 主题文件配置合并（System/Themes/*.json → wm.T）==');
+{
+  const themed = new WindowManager(canvasMock, {
+    theme: 'macos',
+    themeConfigs: { macos: { accent: '#ff0000', window: { bg: '#111111' } } },
+  });
+  ok(themed.T.accent === '#ff0000', '主题文件覆盖 accent');
+  ok(themed.T.window.bg === '#111111', '主题文件覆盖 window.bg');
+  ok(Array.isArray(themed.T.wall) && themed.T.wall[0] === '#1b2a4a', '未覆盖字段回退内置（wall）');
+  themed.setTheme('windows');
+  ok(themed.theme === 'windows' && themed.T.bottomBar === 'taskbar', 'setTheme 切到 windows（无该主题文件配置→用内置）');
+}
+
+console.log('== 右键上下文菜单 ==');
+{
+  mac.locked = false; mac.shutdown = false; mac._loggedOut = false; mac.menu = null;   // 复位上一节状态
+  mac.vfs = new VFS();
+  mac.onContextMenu(400, 400);   // 桌面空白处
+  ok(!!mac.ctxMenu, '桌面右键 → 打开上下文菜单');
+  const L = mac.contextMenuLayout();
+  const labels = ['新建文件夹', '新建文本', '刷新桌面', '个性化...'];
+  let iy = L.y + L.pad;
+  const acts = [];
+  for (const it of L.items) {
+    const h = it.sep ? 9 : L.rowH;
+    if (!it.sep) acts.push([it.label, mac.hitContextMenu(L.x + 20, iy + h / 2)]);
+    iy += h;
+  }
+  ok(acts[0][1] === 'newfolder' && acts[1][1] === 'newfile' && acts[3][1] === 'settings', '右键菜单项命中：新建文件夹/新建文本/…/个性化');
+  // 执行：新建文件夹（写进 /Users/guest/Desktop）
+  await mac.runContextAction('newfolder');
+  ok(await mac.vfs.isDir('/Users/guest/Desktop/新建文件夹'), '新建文件夹 → 落盘');
+  await mac.runContextAction('newfile');
+  ok(await mac.vfs.exists('/Users/guest/Desktop/未命名.txt'), '新建文本 → 落盘');
+  await mac.runContextAction('newfolder');
+  ok(await mac.vfs.isDir('/Users/guest/Desktop/新建文件夹 2'), '重名自动加序号（新建文件夹 2）');
+  ok(mac.ctxMenu === null, '执行后关闭菜单');
+}
+
 console.log('');
-if (fail === 0) console.log('主题/图标/主菜单验证全部通过 ✓ (' + pass + ' 项)');
+if (fail === 0) console.log('主题/图标/主菜单/右键菜单验证全部通过 ✓ (' + pass + ' 项)');
 else { console.log(fail + ' 项失败 ✗'); process.exit(1); }

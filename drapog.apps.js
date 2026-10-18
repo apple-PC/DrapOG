@@ -106,8 +106,8 @@ export function createFinderApp({ vfs }) {
       if (!it) return;
       if (state.cwd.startsWith('/System')) { state.error = '系统目录受保护，禁止删除'; return; }
       const target = vfs.normalize(state.cwd, it.name);
-      const ok = await vfs.rm(target);
-      if (!ok) state.error = '删除失败（目录非空或不存在）';
+      const ok = await moveToTrash(vfs, target);   // 删除 = 移到废纸篓（可还原）
+      if (!ok) state.error = '移到废纸篓失败';
       state.selected = -1;
       await refresh(win, state);
     }
@@ -129,6 +129,7 @@ export function createFinderApp({ vfs }) {
       };
       states.set(win.id, s);
       refresh(win, s);
+      if (win.__openPath) { const p0 = win.__openPath; win.__openPath = null; navigate(win, s, p0); }
     }
     return s;
   }
@@ -445,6 +446,27 @@ export function createFinderApp({ vfs }) {
     },
 
     getCursor(lx, ly) { return 'default'; },
+
+    contextMenu(lx, ly, win) {
+      const s = getState(win);
+      if (s.naming || s.permPrompt || s.viewer) return null;
+      let target = null;
+      if (ly >= listTop(win)) {
+        const idx = Math.floor((ly - listTop(win)) / ROW_H);
+        if (idx >= 0 && idx < s.items.length) target = s.items[idx];
+      }
+      const items = [];
+      if (target) {
+        const path = vfs.normalize(s.cwd, target.name);
+        items.push({ label: '打开', action: () => { if (target.type === 'dir') navigate(win, s, path); else openViewer(win, s, target.name); } });
+        items.push({ label: '移到废纸篓', action: async () => { await moveToTrash(vfs, path); s.selected = -1; await refresh(win, s); } });
+        items.push({ sep: true });
+      }
+      items.push({ label: '新建文件夹', action: () => { s.naming = { kind: 'dir', value: '' }; } });
+      items.push({ label: '新建文本', action: () => { s.naming = { kind: 'file', value: '' }; } });
+      items.push({ label: '刷新', action: () => { refresh(win, s); } });
+      return items;
+    },
   };
 }
 
@@ -735,35 +757,89 @@ export function createAboutApp() {
 }
 
 /* ============================================================
-   Settings —— 设置（移动端软键盘开关）
+   Settings —— 设置（分级菜单：个性化 / 账户 / 通用 / 关于）
    ============================================================ */
 export function createSettingsApp() {
+  const CATS = [
+    { id: 'personal', name: '个性化', icon: '🎨' },
+    { id: 'account',   name: '账户',   icon: '👤' },
+    { id: 'general',   name: '通用',   icon: '⚙' },
+    { id: 'about',     name: '关于',   icon: 'ℹ' },
+  ];
+  const state = { cat: 0 };
+  const SIDEBAR_W = 128, ROW_H = 42;
+  const catRects = () => CATS.map((c, i) => ({ ...c, y: 10 + i * ROW_H, h: ROW_H }));
+  const themeBtnRect = () => ({ x: SIDEBAR_W + 130, y: 62, w: 150, h: 28 });
+  const kbBtnRect = () => ({ x: SIDEBAR_W + 130, y: 24, w: 52, h: 26 });
   return {
     create() {},
     render(ctx, win, wm) {
       const W = win.w, H = win.h - win.TITLEBAR_H;
       ctx.fillStyle = '#1e1e24'; ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.font = '600 15px -apple-system, sans-serif';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText('设置', 16, 12);
-      // 移动端软键盘开关
-      const on = wm.softKeyboard.open;
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
-      ctx.font = '13px -apple-system, sans-serif';
-      ctx.fillText('移动端软键盘：', 16, 52);
-      ctx.fillStyle = on ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.2)';
-      wm.roundRect(150, 48, 52, 26, 13); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(on ? 174 : 160, 61, 10, 0, Math.PI * 2); ctx.fill();
-    },
-    onMouseDown(lx, ly, win, wm) {
-      if (lx >= 150 && lx <= 202 && ly >= 48 && ly <= 74) {
-        wm.softKeyboard.open = !wm.softKeyboard.open;
+      // 侧栏
+      ctx.fillStyle = '#26262b'; ctx.fillRect(0, 0, SIDEBAR_W, H);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      for (let i = 0; i < CATS.length; i++) {
+        const c = catRects()[i];
+        if (i === state.cat) { ctx.fillStyle = 'rgba(10,132,255,0.28)'; ctx.fillRect(0, c.y, SIDEBAR_W, c.h); }
+        ctx.fillStyle = i === state.cat ? '#fff' : 'rgba(255,255,255,0.68)';
+        ctx.font = '14px -apple-system, "Apple Color Emoji", sans-serif';
+        ctx.fillText(c.icon + '  ' + c.name, 16, c.y + c.h / 2);
+      }
+      // 内容
+      const cx = SIDEBAR_W + 22;
+      const cat = CATS[state.cat];
+      ctx.fillStyle = '#fff'; ctx.font = '600 18px -apple-system, sans-serif';
+      ctx.fillText(cat.name, cx, 26);
+      if (cat.id === 'personal') {
+        ctx.fillStyle = 'rgba(255,255,255,0.82)'; ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText('系统主题', cx, 70);
+        const r = themeBtnRect(), isWin = wm.theme === 'windows';
+        ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = !isWin ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.05)'; ctx.fillRect(r.x + 2, r.y + 2, r.w / 2 - 2, r.h - 4);
+        ctx.fillStyle = isWin ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.05)'; ctx.fillRect(r.x + r.w / 2, r.y + 2, r.w / 2 - 2, r.h - 4);
+        ctx.fillStyle = '#fff'; ctx.font = '12px -apple-system, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('macOS', r.x + r.w / 4, r.y + r.h / 2);
+        ctx.fillText('Windows', r.x + r.w * 3 / 4, r.y + r.h / 2);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '12px -apple-system, sans-serif';
+        ctx.fillText('当前：' + (isWin ? 'Windows 11' : 'macOS') + '（切换即时生效）', cx, 108);
+      } else if (cat.id === 'account') {
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '40px -apple-system, sans-serif';
+        ctx.fillText('◆', cx, 74);
+        ctx.font = '600 15px -apple-system, sans-serif'; ctx.fillText('guest', cx + 56, 64);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '12px -apple-system, sans-serif';
+        ctx.fillText('本地账户 · 管理员', cx + 56, 86);
+      } else if (cat.id === 'general') {
+        ctx.fillStyle = 'rgba(255,255,255,0.82)'; ctx.font = '14px -apple-system, sans-serif';
+        ctx.fillText('移动端软键盘', cx, 37);
+        const on = wm.softKeyboard.open, r = kbBtnRect();
+        ctx.fillStyle = on ? 'rgba(10,132,255,0.9)' : 'rgba(255,255,255,0.2)'; ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(on ? r.x + r.w - 13 : r.x + 13, r.y + r.h / 2, 10, 0, Math.PI * 2); ctx.fill();
+      } else if (cat.id === 'about') {
+        ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.font = '13px -apple-system, sans-serif';
+        const lines = ['◆ DrapOG · 自举原型', 'DrapLang → DrapCC → DrapVM', 'L1 基座 / L2 语言 / L3 命令 / L4 应用 / L5 GUI'];
+        let y = 62; for (const l of lines) { ctx.fillText(l, cx, y); y += 26; }
       }
     },
-    getCursor() { return 'pointer'; },
+    onMouseDown(lx, ly, win, wm) {
+      for (let i = 0; i < CATS.length; i++) {
+        const c = catRects()[i];
+        if (lx <= SIDEBAR_W && ly >= c.y && ly <= c.y + c.h) { state.cat = i; return; }
+      }
+      const cat = CATS[state.cat];
+      if (cat.id === 'personal') {
+        const r = themeBtnRect();
+        if (lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h) wm.setTheme(wm.theme === 'windows' ? 'macos' : 'windows');
+      } else if (cat.id === 'general') {
+        const r = kbBtnRect();
+        if (lx >= r.x && lx <= r.x + r.w && ly >= r.y && ly <= r.y + r.h) wm.softKeyboard.open = !wm.softKeyboard.open;
+      }
+    },
+    getCursor(lx, ly) {
+      if (lx <= SIDEBAR_W) return 'pointer';
+      return 'default';
+    },
   };
 }
 
@@ -774,12 +850,12 @@ export function createSettingsApp() {
    ============================================================ */
 export function createEditApp({ vfs }) {
   const states = new Map();
-  const TOOL_H = 34, STATUS_H = 20;
+  const TOOL_H = 34, STATUS_H = 20, PATH_H = 26;
 
   function getState(win) {
     let s = states.get(win.id);
     if (!s) {
-      s = { path: '/Users/guest/Documents/readme.txt', text: '', cursor: 0, scroll: 0, status: '' };
+      s = { path: '/Users/guest/Documents/readme.txt', text: '', cursor: 0, scroll: 0, status: '', editingPath: false, pathDraft: '' };
       states.set(win.id, s);
       vfs.read(s.path).then(c => {
         s.text = (c == null ? '' : String(c));
@@ -819,8 +895,24 @@ export function createEditApp({ vfs }) {
         ctx.fillText(b.icon, b.x + b.w / 2, b.y + b.h / 2);
       }
 
+      // 路径栏（点击编辑：改路径后「打开」加载、「保存」写入该路径 → 打开/另存为）
+      const py = TOOL_H;
+      ctx.fillStyle = '#1c1c22'; ctx.fillRect(0, py, W, PATH_H);
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+      ctx.beginPath(); ctx.moveTo(0, py + PATH_H); ctx.lineTo(W, py + PATH_H); ctx.stroke();
+      ctx.font = '12px Consolas, monospace'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      if (s.editingPath) {
+        ctx.fillStyle = '#9cf'; ctx.fillText('路径: ', 8, py + PATH_H / 2);
+        const lw = ctx.measureText('路径: ').width;
+        ctx.fillStyle = '#fff'; ctx.fillText(s.pathDraft, 8 + lw, py + PATH_H / 2);
+        const cw = ctx.measureText(s.pathDraft).width;
+        ctx.fillRect(8 + lw + cw, py + 5, 2, PATH_H - 10);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fillText('📂 ' + s.path, 8, py + PATH_H / 2);
+      }
+
       // 文本区
-      const top = TOOL_H + 6;
+      const top = TOOL_H + PATH_H + 4;
       const lines = s.text.split('\n');
       const lh = 18, pad = 10;
       const maxRows = Math.max(0, Math.floor((H - top - STATUS_H - 6) / lh));
@@ -866,11 +958,25 @@ export function createEditApp({ vfs }) {
             return;
           }
         }
+        return;
       }
+      if (ly < TOOL_H + PATH_H) { s.editingPath = true; s.pathDraft = s.path; return; }
     },
 
     async onKeyDown(e, win) {
       const s = getState(win);
+      if (s.editingPath) {
+        if (e.key === 'Enter') {
+          s.path = (s.pathDraft.trim() || s.path); s.editingPath = false;
+          vfs.read(s.path).then(c => { s.text = (c == null ? '' : String(c)); s.cursor = s.text.length; s.status = '已打开 ' + s.path; })
+            .catch(() => { s.status = '打开失败'; });
+          return true;
+        }
+        if (e.key === 'Escape') { s.editingPath = false; return true; }
+        if (e.key === 'Backspace') { s.pathDraft = s.pathDraft.slice(0, -1); return true; }
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { s.pathDraft += e.key; return true; }
+        return true;
+      }
       if (e.metaKey || e.ctrlKey) {
         if (e.key === 's') {
           vfs.write(s.path, s.text).then(ok => { s.status = ok ? '已保存' : '保存失败'; })
@@ -902,4 +1008,195 @@ export function createEditApp({ vfs }) {
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
   }
+}
+
+/* ============================================================
+   废纸篓 / 回收站  +  此电脑
+   删除 = 移动到 /Library/Trash（重名加序号）；可还原 / 清空。
+   逻辑为纯 VFS 操作，可在 node 下单测；下面是两个宿主 GUI 应用。
+   ============================================================ */
+export const TRASH_DIR = '/Library/Trash';
+
+async function copyRecursive(vfs, src, dst) {
+  if (await vfs.isDir(src)) {
+    await vfs.mkdir(dst);
+    const items = (await vfs.ls(src)) || [];
+    for (const it of items) await copyRecursive(vfs, vfs.normalize(src, it.name), vfs.normalize(dst, it.name));
+  } else {
+    const c = await vfs.read(src);
+    await vfs.write(dst, c == null ? '' : c);
+  }
+}
+async function rmRecursive(vfs, path) {
+  if (await vfs.isDir(path)) {
+    const items = (await vfs.ls(path)) || [];
+    for (const it of items) await rmRecursive(vfs, vfs.normalize(path, it.name));
+  }
+  await vfs.rm(path);
+}
+async function uniqueIn(vfs, dir, name) {
+  let target = vfs.normalize(dir, name);
+  if (!(await vfs.exists(target))) return target;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let i = 2;
+  while (await vfs.exists(vfs.normalize(dir, stem + ' ' + i + ext))) i++;
+  return vfs.normalize(dir, stem + ' ' + i + ext);
+}
+
+/** 把 path 移入废纸篓（复制→删源）；成功返回 true */
+export async function moveToTrash(vfs, path) {
+  try {
+    const name = path.split('/').filter(Boolean).pop();
+    if (!name) return false;
+    await vfs.mkdir(TRASH_DIR);
+    const target = await uniqueIn(vfs, TRASH_DIR, name);
+    await copyRecursive(vfs, path, target);
+    await rmRecursive(vfs, path);
+    return true;
+  } catch (e) { return false; }
+}
+/** 废纸篓条目列表 */
+export async function listTrash(vfs) {
+  try { return (await vfs.ls(TRASH_DIR)) || []; } catch (e) { return []; }
+}
+/** 从废纸篓还原 name 到 destDir */
+export async function restoreFromTrash(vfs, name, destDir) {
+  try {
+    const src = vfs.normalize(TRASH_DIR, name);
+    if (!(await vfs.exists(src))) return false;
+    await vfs.mkdir(destDir);
+    const dst = await uniqueIn(vfs, destDir, name);
+    await copyRecursive(vfs, src, dst);
+    await rmRecursive(vfs, src);
+    return true;
+  } catch (e) { return false; }
+}
+/** 清空废纸篓 */
+export async function emptyTrash(vfs) {
+  try {
+    const items = (await vfs.ls(TRASH_DIR)) || [];
+    for (const it of items) await rmRecursive(vfs, vfs.normalize(TRASH_DIR, it.name));
+    return true;
+  } catch (e) { return false; }
+}
+
+export function createTrashApp({ vfs }) {
+  const states = new Map();
+  const TOOL_H = 36, ROW_H = 28;
+  const BTNS = [
+    { id: 'restore', label: '还原' },
+    { id: 'empty',   label: '清空' },
+  ];
+  function btnRects(win) {
+    const x0 = 8, y = 4, h = 28, gap = 8;
+    let x = x0;
+    return BTNS.map(b => { const w = 64; const r = { ...b, x, y, w, h }; x += w + gap; return r; });
+  }
+  async function refresh(win, s) {
+    s.items = await listTrash(vfs);
+    if (s.selected >= s.items.length) s.selected = -1;
+  }
+  function getState(win) {
+    let s = states.get(win.id);
+    if (!s) { s = { items: [], selected: -1, status: '' }; states.set(win.id, s); refresh(win, s); }
+    return s;
+  }
+  return {
+    create(win) { getState(win); },
+    render(ctx, win) {
+      const s = getState(win);
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#232327'; ctx.fillRect(0, 0, W, H);
+      // 工具栏
+      ctx.fillStyle = '#2e2e34'; ctx.fillRect(0, 0, W, TOOL_H);
+      for (const b of btnRects(win)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(b.x, b.y, b.w, b.h, 6) : ctx.rect(b.x, b.y, b.w, b.h); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2);
+      }
+      // 列表
+      ctx.textAlign = 'left';
+      if (s.items.length === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText('废纸篓为空', 16, TOOL_H + 20);
+      } else {
+        for (let i = 0; i < s.items.length; i++) {
+          const it = s.items[i]; const y = TOOL_H + 8 + i * ROW_H;
+          if (i === s.selected) { ctx.fillStyle = 'rgba(10,132,255,0.35)'; ctx.fillRect(0, y, W, ROW_H); }
+          ctx.font = '15px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#ddd'; ctx.fillText(it.type === 'dir' ? '📁' : '📄', 12, y + ROW_H / 2);
+          ctx.fillStyle = '#cfcfcf'; ctx.fillText(it.name, 38, y + ROW_H / 2);
+        }
+      }
+      if (s.status) { ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '11px -apple-system, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(s.status, 8, H - 16); }
+    },
+    async onMouseDown(lx, ly, win) {
+      const s = getState(win);
+      if (ly < TOOL_H) {
+        for (const b of btnRects(win)) {
+          if (lx >= b.x && lx <= b.x + b.w && ly >= b.y && ly <= b.y + b.h) {
+            if (b.id === 'empty') { await emptyTrash(vfs); s.selected = -1; s.status = '已清空'; await refresh(win, s); }
+            else if (b.id === 'restore') {
+              const it = s.items[s.selected];
+              if (it) { await restoreFromTrash(vfs, it.name, '/Users/guest'); s.status = '已还原 ' + it.name; await refresh(win, s); }
+              else s.status = '请先选中一项';
+            }
+            return;
+          }
+        }
+        return;
+      }
+      const idx = Math.floor((ly - TOOL_H - 8) / ROW_H);
+      s.selected = (idx >= 0 && idx < s.items.length) ? idx : -1;
+    },
+    onDoubleClick(lx, ly, win) {
+      const s = getState(win);
+      if (ly < TOOL_H) return;
+      const idx = Math.floor((ly - TOOL_H - 8) / ROW_H);
+      if (idx >= 0 && idx < s.items.length) s.selected = idx;
+    },
+    getCursor() { return 'default'; },
+  };
+}
+
+export function createThisPCApp({ vfs }) {
+  const VOLUMES = [
+    { name: '本地磁盘 (C:)', path: '/', icon: '💽' },
+    { name: '用户主目录', path: '/Users/guest', icon: '🏠' },
+    { name: '系统', path: '/System', icon: '⚙' },
+    { name: '应用程序', path: '/Applications', icon: '📦' },
+    { name: '资源库', path: '/Library', icon: '📚' },
+  ];
+  return {
+    create() {},
+    render(ctx, win, wm) {
+      const W = win.w, H = win.h - win.TITLEBAR_H;
+      ctx.fillStyle = '#232327'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '600 15px -apple-system, sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText('此电脑', 16, 12);
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '12px -apple-system, sans-serif';
+      ctx.fillText('设备和驱动器（双击在 Finder 打开）', 16, 36);
+      let y = 64;
+      for (const v of VOLUMES) {
+        ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(12, y, W - 24, 44);
+        ctx.font = '22px -apple-system, sans-serif'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff'; ctx.fillText(v.icon, 22, y + 22);
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '13px -apple-system, sans-serif';
+        ctx.fillText(v.name, 58, y + 16);
+        ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillText(v.path, 58, y + 32);
+        y += 52;
+      }
+    },
+    onDoubleClick(lx, ly, win, wm) {
+      const idx = Math.floor((ly - 64) / 52);
+      const v = VOLUMES[idx];
+      if (v && wm && wm.openFinderAt) wm.openFinderAt(v.path);
+      else if (v && wm) wm.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder' });
+    },
+    getCursor(lx, ly) { return (ly >= 64 && (ly - 64) % 52 < 44) ? 'pointer' : 'default'; },
+  };
 }

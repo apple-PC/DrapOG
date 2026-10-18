@@ -1,0 +1,24 @@
+{
+  "id": "macos",
+  "name": "macOS",
+  "comment": "DrapOG GUI 主题规范 v1：控件位置/样式、顶栏、底栏、壁纸渐变、窗口配色。WM 启动时由 gui.js fetch 本文件并合并进 wm.T；应用可读 wm.T.window.* 着色以适配主题。",
+  "controlsSide": "left",
+  "controls": "circles",
+  "topBar": "menubar",
+  "bottomBar": "dock",
+  "menuBarH": 28,
+  "dockH": 60,
+  "taskbarH": 48,
+  "accent": "#0a84ff",
+  "wall": ["#1b2a4a", "#3a1c4a", "#0d0d12"],
+  "window": {
+    "bg": "#26262b",
+    "titleBg": "#323237",
+    "titleText": "rgba(255,255,255,0.92)",
+    "text": "rgba(255,255,255,0.85)",
+    "muted": "rgba(255,255,255,0.55)",
+    "panel": "#1e1e24",
+    "toolbar": "#323237",
+    "border": "rgba(255,255,255,0.14)"
+  }
+}

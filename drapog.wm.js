@@ -23,8 +23,9 @@ const THEMES = {
 export class WindowManager {
   constructor(canvas, opts = {}) {
     this.theme = normalizeTheme(opts.theme);
-    this.T = THEMES[this.theme];
-    this.TASKBAR_H = 48;
+    this.themeConfigs = opts.themeConfigs || {};   // 来自 System/Themes/<id>.json
+    this.T = Object.assign({}, THEMES[this.theme], this.themeConfigs[this.theme] || {});
+    this.TASKBAR_H = this.T.taskbarH || 48;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.windows = [];
@@ -45,8 +46,9 @@ export class WindowManager {
     const TITLES = {
       finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
       conv: 'Conv', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
+      trash: '废纸篓', thispc: '此电脑',
     };
-    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'appmgr', 'edit', 'settings', 'about']
+    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc']
       .map(id => ({ id, letter: appIcon(id), title: TITLES[id] }));
 
     this._appImpls = new Map();   // appId -> 实现
@@ -62,7 +64,8 @@ export class WindowManager {
   // 运行时切换主题（如 shell 里 `gui windows`）：更新配置，下一帧 render 即生效
   setTheme(theme) {
     this.theme = normalizeTheme(theme);
-    this.T = THEMES[this.theme];
+    this.T = Object.assign({}, THEMES[this.theme], this.themeConfigs[this.theme] || {});
+    this.TASKBAR_H = this.T.taskbarH || 48;
   }
 
   createWindow(opts) {
@@ -80,6 +83,7 @@ export class WindowManager {
       maximized: false,
       prevRect: null,
       needRedraw: true,
+      __openPath: opts.openPath || null,   // 初始导航路径（如 ThisPC 双击在 Finder 打开）
     };
     this.windows.push(win);
     this.zOrder.push(id);
@@ -251,6 +255,9 @@ export class WindowManager {
     // 主菜单打开：命中项则执行，否则关闭并吞掉本次点击
     if (this.menu) { this.runMenuAction(this.hitMenu(x, y)); return; }
 
+    // 右键菜单打开：命中项则执行，否则关闭
+    if (this.ctxMenu) { this.runContextAction(this.hitContextMenu(x, y)); return; }
+
     // macOS：Apple 标志开主菜单；菜单栏其它区域（键盘按钮）
     if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) {
       if (this.hitAppleLogo(x, y)) { this.toggleMenu('apple'); return; }
@@ -339,6 +346,7 @@ export class WindowManager {
     if (this.locked) { this.unlock(); return; }
     if (this.shutdown) { this.powerOn(); return; }
     if (this.menu && e.key === 'Escape') { this.closeMenu(); return; }
+    if (this.ctxMenu && e.key === 'Escape') { this.closeContextMenu(); return; }
     if (!this.focusedId) return;
     const w = this.windows.find(w => w.id === this.focusedId);
     if (!w || w.minimized) return;
@@ -473,7 +481,6 @@ export class WindowManager {
   }
 
   launchApp(app) {
-    // 若应用实现了 launch（如 DrapLang 应用需自建 VM 窗口），优先调用
     const impl = this.getApp(app.id);
     if (impl && typeof impl.launch === 'function') { impl.launch(this); return; }
     // 无 WM 实现但注册表里有（DrapLang 应用：gui 交 WM、cli 跑终端）→ 统一经注册表启动
@@ -496,6 +503,17 @@ export class WindowManager {
     });
   }
 
+  // 在 Finder 里打开指定路径（ThisPC 双击用）
+  openFinderAt(path) {
+    const existing = this.windows.find(w => w.appId === 'finder' && w.minimized);
+    if (existing) { this.restoreWindow(existing.id); }
+    const offset = (this.windows.length % 5) * 24;
+    this.createWindow({
+      x: 120 + offset, y: 80 + offset, w: 620, h: 420,
+      title: 'Finder', appId: 'finder', openPath: path,
+    });
+  }
+
   /* ==================== 渲染 ==================== */
 
   render() {
@@ -510,6 +528,7 @@ export class WindowManager {
     else this.renderTaskbar(W, H);
     this.renderSoftKeyboard(W, H);
     if (this.menu) this.renderMenu();
+    if (this.ctxMenu) this.renderContextMenu();
     if (this.locked) this.renderLock();
     if (this.shutdown) this.renderShutdown();
   }
@@ -805,6 +824,95 @@ export class WindowManager {
   }
   unlock() { this.locked = false; this._loggedOut = false; }
   powerOn() { if (typeof location !== 'undefined') location.reload(); }
+
+  /* ---------- 右键上下文菜单 ---------- */
+  onContextMenu(x, y) {
+    if (this.locked || this.shutdown || this.menu || this.ctxMenu) return;
+    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) return;
+    const bottom = this.T.bottomBar === 'dock' ? (this.DOCK_H + this.DOCK_MARGIN * 2) : this.TASKBAR_H;
+    if (y > this.H() - bottom) return;
+    const w = this.hitTest(x, y);
+    if (w) {
+      const app = this.getApp(w.appId);
+      const items = (app && app.contextMenu) ? app.contextMenu(x - w.x, y - w.y - w.TITLEBAR_H, w, this) : [{ label: '刷新', action: 'refresh' }];
+      if (items && items.length) this.openContextMenu(x, y, items, null);
+    } else {
+      this.openContextMenu(x, y, [
+        { label: '新建文件夹', action: 'newfolder' },
+        { label: '新建文本', action: 'newfile' },
+        { sep: true },
+        { label: '刷新桌面', action: 'refresh' },
+        { label: '个性化...', action: 'settings' },
+      ], '/Users/guest/Desktop');
+    }
+  }
+  openContextMenu(x, y, items, target) { this.ctxMenu = { x, y, items, target: target || null }; }
+  closeContextMenu() { this.ctxMenu = null; }
+  contextMenuLayout() {
+    const items = this.ctxMenu.items;
+    const rowH = 26, pad = 6, w = 176;
+    let h = pad * 2;
+    for (const it of items) h += it.sep ? 9 : rowH;
+    const W = this.W(), H = this.H();
+    let x = this.ctxMenu.x, y = this.ctxMenu.y;
+    if (x + w > W - 4) x = W - w - 4;
+    if (y + h > H - 4) y = H - h - 4;
+    return { x, y, w, h, items, rowH, pad };
+  }
+  hitContextMenu(x, y) {
+    if (!this.ctxMenu) return null;
+    const L = this.contextMenuLayout();
+    if (x < L.x || x > L.x + L.w || y < L.y || y > L.y + L.h) return null;
+    let iy = L.y + L.pad;
+    for (const it of L.items) {
+      const h = it.sep ? 9 : L.rowH;
+      if (!it.sep && y >= iy && y < iy + h) return it.action;
+      iy += h;
+    }
+    return null;
+  }
+  async _uniqueName(dir, base) {
+    const vfs = this.vfs;
+    const norm = p => vfs.normalize(dir, p);
+    if (!vfs || !(await vfs.exists(norm(base)))) return base;
+    const dot = base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const ext = dot > 0 ? base.slice(dot) : '';
+    let i = 2;
+    while (await vfs.exists(norm(stem + ' ' + i + ext))) i++;
+    return stem + ' ' + i + ext;
+  }
+  async runContextAction(a) {
+    const target = this.ctxMenu ? this.ctxMenu.target : null;
+    this.closeContextMenu();
+    if (!a) return;
+    if (typeof a === 'function') { a(this); return; }   // 应用自定义动作（如 Finder 右键）
+    if (a === 'newfolder' || a === 'newfile') {
+      const vfs = this.vfs; if (!vfs) return;
+      const dir = target || '/Users/guest/Desktop';
+      const base = a === 'newfolder' ? '新建文件夹' : '未命名.txt';
+      const name = await this._uniqueName(dir, base);
+      if (a === 'newfolder') await vfs.mkdir(vfs.normalize(dir, name));
+      else await vfs.write(vfs.normalize(dir, name), '');
+    } else if (a === 'settings') {
+      this.launchApp({ id: 'settings', letter: 'Se', title: '设置' });
+    }
+    // 'refresh' 由各窗口自行处理；桌面无需操作
+  }
+  renderContextMenu() {
+    const ctx = this.ctx;
+    const L = this.contextMenuLayout();
+    ctx.fillStyle = 'rgba(40,40,46,0.98)'; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.stroke();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    let iy = L.y + L.pad;
+    for (const it of L.items) {
+      const h = it.sep ? 9 : L.rowH;
+      if (it.sep) { ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(L.x + 6, iy + 4.5); ctx.lineTo(L.x + L.w - 6, iy + 4.5); ctx.stroke(); }
+      else { ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '13px -apple-system, sans-serif'; ctx.fillText(it.label, L.x + 14, iy + h / 2); }
+      iy += h;
+    }
+  }
 
   renderMenu() {
     const ctx = this.ctx;

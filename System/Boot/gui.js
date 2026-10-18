@@ -11,6 +11,7 @@ import { DrapShell } from '../../drapog.shell.js';
 import {
   createFinderApp, createTerminalApp, createAppManagerApp,
   createEditApp, createSettingsApp, createAboutApp,
+  createTrashApp, createThisPCApp,
 } from '../../drapog.apps.js';
 import { DrapSYS } from '../../drapog.sys.js';
 import { drapAppBridge } from '../../drapog.launcher.js';
@@ -28,7 +29,15 @@ function isMobileDevice() {
 
 const screen = document.getElementById('screen');
 
-export function startGUI(opts = {}) {
+export async function startGUI(opts = {}) {
+  // 加载主题文件（规范：System/Themes/<id>.json），合并进 WM 的 wm.T
+  let themeConfigs = {};
+  try {
+    for (const t of ['macos', 'windows']) {
+      const r = await fetch(new URL('../Themes/' + t + '.json', import.meta.url), { cache: 'no-store' });
+      if (r.ok) themeConfigs[t] = await r.json();
+    }
+  } catch (e) { /* 用 WM 内置默认 */ }
   return new Promise(resolve => {
     // DPR 高清
     const dpr = window.devicePixelRatio || 1;
@@ -47,7 +56,7 @@ export function startGUI(opts = {}) {
     // VFS：优先用外部传的，否则新建
     const vfs = opts.vfs || new VFS();
 
-    const wm = new WindowManager(screen, { theme: opts.theme });
+    const wm = new WindowManager(screen, { theme: opts.theme, themeConfigs });
 
     // 应用注册表（L4：整合 draplang 工具 + 制定 .app 格式）
     const registry = new AppRegistry();
@@ -60,6 +69,8 @@ export function startGUI(opts = {}) {
     registry.addHost('settings', { name: '设置',         icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
+    registry.addHost('trash',    { name: '废纸篓',       title: '废纸篓' });
+    registry.addHost('thispc',   { name: '此电脑',       title: '此电脑' });
     // DrapLang 应用（内存模式用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 scan 覆盖）
     // 演示/调色板类应用（GuiDemo/Paint）已移除，只保留实用应用。
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
@@ -82,6 +93,8 @@ export function startGUI(opts = {}) {
     wm.registerApp('edit',     createEditApp({ vfs }));
     wm.registerApp('settings', createSettingsApp());
     wm.registerApp('about',    createAboutApp());
+    wm.registerApp('trash',    createTrashApp({ vfs }));
+    wm.registerApp('thispc',   createThisPCApp({ vfs }));
 
     // 应用管理助手：从注册表读取所有应用网格展示并启动
     wm.registerApp('appmgr', createAppManagerApp({ registry, vfs }));
@@ -160,7 +173,15 @@ export function startGUI(opts = {}) {
       ctx.setTransform(d2, 0, 0, d2, 0, 0);
     }
 
+    function onContextMenu(e) {
+      e.preventDefault();
+      const p = pos(e);
+      wm.onContextMenu(p.x, p.y);
+      screen.style.cursor = wm.getCursor(p.x, p.y);
+    }
+
     screen.addEventListener('mousedown', onMouseDown);
+    screen.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup',   onMouseUp);
     window.addEventListener('keydown',   onKeyDown);
@@ -186,6 +207,7 @@ export function startGUI(opts = {}) {
       shutdown() {
         running = false;
         screen.removeEventListener('mousedown', onMouseDown);
+        screen.removeEventListener('contextmenu', onContextMenu);
         window.removeEventListener('mousemove', onMouseMove);
         window.removeEventListener('mouseup',   onMouseUp);
         window.removeEventListener('keydown',   onKeyDown);
