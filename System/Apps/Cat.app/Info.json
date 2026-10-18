@@ -1,0 +1,11 @@
+{
+  "id": "cat",
+  "name": "Cat",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "C",
+  "author": "DrapOG",
+  "description": "打印文件内容（支持 -n 行号）",
+  "category": "tools"
+}

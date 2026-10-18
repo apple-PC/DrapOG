@@ -1,0 +1,11 @@
+{
+  "id": "grep",
+  "name": "Grep",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "G",
+  "author": "DrapOG",
+  "description": "在文件中查找包含指定模式的行",
+  "category": "tools"
+}

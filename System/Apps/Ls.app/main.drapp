@@ -1,0 +1,22 @@
+// ls —— 列出目录内容（目录名加 /）
+// 用法: ls [路径]     默认 /Users/guest
+// 运行: run ls [路径]
+// 说明: 这是运行在 cmd 里的 drapp 程序；只做功能，不碰 GUI。
+import str
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  let path = "/Users/guest"
+  if (n >= 2) { path = syscall args_get(1) }
+  if (syscall fs_isdir(path) == 0) {
+    term_println("ls: 不是目录: " + path)
+    return 1
+  }
+  let listing = syscall fs_ls(path)
+  if (listing == 0) {
+    term_println("ls: 无法读取: " + path)
+    return 2
+  }
+  term_println(listing)
+  return 0
+}

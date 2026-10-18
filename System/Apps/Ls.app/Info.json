@@ -1,0 +1,11 @@
+{
+  "id": "ls",
+  "name": "Ls",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "L",
+  "author": "DrapOG",
+  "description": "列出目录内容（目录名加 /）",
+  "category": "tools"
+}

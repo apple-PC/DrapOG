@@ -1,0 +1,31 @@
+// grep —— 在文件中查找包含指定模式的行
+// 用法: grep <模式> <文件>
+// 运行: run grep <模式> <文件>
+// 说明: 这是运行在 cmd 里的 drapp 程序；只做功能，不碰 GUI。
+import str
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  if (n < 3) {
+    term_println("用法: grep <模式> <文件>")
+    return 1
+  }
+  let pattern = syscall args_get(1)
+  let path = syscall args_get(2)
+  if (syscall fs_exists(path) == 0) {
+    term_println("grep: 找不到文件: " + path)
+    return 2
+  }
+  let content = syscall fs_read(path)
+  let norm = replace(content, "\r", "")
+  let lines = split(norm, "\n")
+  let i = 0
+  while (i < lines.len) {
+    let line = lines[i]
+    if (contains(line, pattern) == 1) {
+      term_println(line)
+    }
+    i = i + 1
+  }
+  return 0
+}

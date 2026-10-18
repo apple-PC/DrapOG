@@ -1,0 +1,11 @@
+{
+  "id": "wc",
+  "name": "Wc",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "W",
+  "author": "DrapOG",
+  "description": "统计文件行数 / 词数 / 字符数",
+  "category": "tools"
+}

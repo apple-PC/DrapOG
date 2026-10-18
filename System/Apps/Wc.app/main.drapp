@@ -1,0 +1,47 @@
+// wc —— 统计文件行数 / 词数 / 字符数
+// 用法: wc <文件>
+// 运行: run wc <文件>
+// 说明: 逐字符扫描，兼容 \r\n；这是运行在 cmd 里的 drapp 程序。
+import str
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  if (n < 2) {
+    term_println("用法: wc <文件>")
+    return 1
+  }
+  let path = syscall args_get(1)
+  if (syscall fs_exists(path) == 0) {
+    term_println("wc: 找不到文件: " + path)
+    return 2
+  }
+  let content = syscall fs_read(path)
+  let norm = replace(content, "\r", "")
+  let total = len(norm)
+  let chars = total
+  let lines = 0
+  let words = 0
+  let inWord = 0
+  let i = 0
+  while (i < total) {
+    let c = charAt(norm, i)
+    if (c == "\n") {
+      lines = lines + 1
+      inWord = 0
+    } else {
+      if (c == " " || c == "\t") {
+        inWord = 0
+      } else {
+        if (inWord == 0) { words = words + 1 }
+        inWord = 1
+      }
+    }
+    i = i + 1
+  }
+  if (total > 0) {
+    let last = charAt(norm, total - 1)
+    if (last != "\n") { lines = lines + 1 }
+  }
+  term_println(itoa(lines) + " " + itoa(words) + " " + itoa(chars) + " " + path)
+  return 0
+}
