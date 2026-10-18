@@ -20,6 +20,11 @@ export class DrapShell {
     this.vfs = io.vfs;
     this.cwd = '/Users/guest';
     this.registry = io.registry || null;   // 应用注册表（L3/L4 统一启动）
+    // REPL 自举状态（务必初始化，否则首次 execute 读 inputWaiters 会崩）
+    this.replStarted = false;
+    this.legacyMode = false;
+    this.inputQueue = [];
+    this.inputWaiters = [];
   }
 
   /* ============================================================
@@ -49,10 +54,18 @@ export class DrapShell {
   async _ensureRepl() {
     if (this.replStarted) return;
     this.replStarted = true;
-    const src = await this.vfs.read('/System/shell.drapp');
+    let src = await this.vfs.read('/System/shell.drapp');
+    if (src === null) {
+      // 未挂载（内存模式）：从项目服务端 fetch 源码，免 mount 即可跑 DrapLang Shell
+      try {
+        const r = await fetch(new URL('System/shell.drapp', import.meta.url), { cache: 'no-store' });
+        if (r.ok) src = await r.text();
+      } catch (e) { /* 忽略，落入下方抛错 */ }
+    }
     if (src === null) throw new Error('缺少 /System/shell.drapp');
     const { DrapCC } = await import('./drapcc.js');
     const { VM } = await import('./drapog.vm.js');
+    const { DrapSYS } = await import('./drapog.sys.js');
     const program = new DrapCC(src).compile();
     const vm = new VM();
     vm.load(program);

@@ -34,7 +34,7 @@ entry fn main() -> i32 {
             term_print("  cat <path>        查看文件\n")
             term_print("  rm <path>         删除文件/空目录\n")
             term_print("  clear             清屏\n")
-            term_print("  gui               切换到图形界面\n")
+            term_print("  gui [macos|windows]  切换图形界面/主题\n")
             term_print("  time              显示时间戳\n")
             term_print("  exit              退出 Shell\n")
             term_print("  其余命令（mount/cc/load/save/asm/dis/dump/run...）由宿主处理\n")
@@ -107,7 +107,7 @@ entry fn main() -> i32 {
             syscall term_clear()
 
         } else if (cmd == "gui") {
-            syscall term_gui()
+            syscall term_hostcmd(line)
 
         } else if (cmd == "time") {
             let t = syscall time_now()

@@ -59,6 +59,12 @@ export class WindowManager {
 
   getApp(id) { return this._appImpls.get(id); }
 
+  // 运行时切换主题（如 shell 里 `gui windows`）：更新配置，下一帧 render 即生效
+  setTheme(theme) {
+    this.theme = normalizeTheme(theme);
+    this.T = THEMES[this.theme];
+  }
+
   createWindow(opts) {
     const id = this.nextId++;
     const win = {

@@ -480,7 +480,7 @@ export function createTerminalApp({ vfs, DrapShell, registry }) {
         print: push,
         clear: () => { s.lines = []; s.scrollTop = 0; },
         exit: () => { if (wm) wm.closeWindow(win.id); },
-        switchToGUI: () => {},
+        switchToGUI: (theme) => { if (wm && typeof wm.setTheme === 'function') wm.setTheme(theme); },
         getDemoSource: () => [
           'entry fn main() -> i32 {',
           '    term_print("Hello, DrapOG!\\n")',

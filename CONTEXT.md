@@ -119,6 +119,12 @@
   - **图标统一**：新增 `appIcon(id)`——取 id 前两个字母、首字母大写次字母小写（finder→Fi、calc→Ca、conv→Co）；registry（host/drap/scan）与 WM dock 全部改用，弃用 emoji/杂字。
   - **删除演示/调色板应用**：移除 `GuiDemo.app`、`Paint.app`（及 dock/registry/自动启动引用；自举改自动启动 Calc）。`System/app_gui.drapp`/`app_paint.drapp` 保留仅供 test_gui/test_paint。
   - 新增 test_theme.mjs（appIcon / normalizeTheme / WM 两主题工作区与控件位置 / 任务栏布局 / gui 命令传参，19 断言全绿）；全套 19 个测试文件回归无回归
+- **修复 DrapLang Shell 自举 + `gui` 主题透传（项目 1.8.1，bugfix）**：
+  - `_ensureRepl` 漏 import `DrapSYS`（用了 `new DrapSYS` 却只动态 import 了 DrapCC/VM）→ 挂载后一输命令就「DrapSYS is not defined」回退 legacy；已补 import。
+  - 构造函数未初始化 REPL 状态（`inputWaiters/inputQueue/replStarted/legacyMode` 用了却没在 constructor 赋值）→ REPL 模式首次 `execute` 读 `inputWaiters.length` 直接崩；已在 constructor 初始化。**这两条意味着 DrapLang 自举 Shell 此前从未真正跑起来（总是回退 JS legacy），现已真正可用。**
+  - 免 mount 可用 Shell：`_ensureRepl` 在 vfs 读不到 `/System/shell.drapp` 时，改用 `fetch(new URL('System/shell.drapp', import.meta.url))` 从项目服务端取源码——内存模式（未挂载）也能跑 DrapLang Shell，不必先 `mount`。
+  - `gui <theme>` 透修：shell.drapp 的 `gui` 分支改走 `term_hostcmd(line)`（原来 `term_gui()` 丢主题参数）→ executeLegacy 解析 `gui windows` → `switchToGUI('windows')`；GUI 内 Terminal 的 `switchToGUI` 改为 `wm.setTheme(theme)` 实时切换（原为 no-op）；CMD 内仍走 `startGUI({theme})`。
+  - 新增 test_shellrep.mjs（真跑 REPL：自举不回退、输出 help、`gui windows`→switchToGUI('windows')）；全套 20 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -796,4 +802,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.8.0
+最后更新：2026-10-18　当前版本：1.8.1
