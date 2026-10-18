@@ -1,93 +1,114 @@
-// test_bios.mjs —— 验证 BIOS Setup：纯设置逻辑 + showSetup 交互（mock 浏览器环境）
-// 覆盖：normalize/clamp、load/save 往返、损坏回退、mode 循环、timeout 调整；
-//       showSetup：调整值→F10 保存写 CMOS、Esc 丢弃、恢复默认。
-import assert from 'assert';
+// test_bios.mjs —— 验证 BIOS 设置：纯逻辑 + 项目文件持久化 + 两级菜单交互
+// 存储改为「项目文件」System/Settings/bios.json（经 VFS），不再是 localStorage。
+// showSetup(vfs) 用 MemoryBackend VFS 充当「项目磁盘」，驱动按键后核对落盘内容。
+import { VFS } from './drapog.vfs.js';
 
-// ---- 浏览器环境 mock（必须在 import setup.js 之前就位）----
-const store = new Map();
-globalThis.localStorage = {
-  getItem: k => (store.has(k) ? store.get(k) : null),
-  setItem: (k, v) => { store.set(k, String(v)); },
-  removeItem: k => { store.delete(k); },
-};
+// ---- 浏览器环境 mock（import setup.js 前就位；navigator 只读，不赋值）----
 const ctxMock = new Proxy({}, {
   get(t, p) { if (p in t) return t[p]; return () => ({ width: 10 }); },
   set(t, p, v) { t[p] = v; return true; },
 });
-const screenMock = { width: 800, height: 600, getContext: () => ctxMock, style: {} };
+const screenMock = { width: 820, height: 600, getContext: () => ctxMock, style: {} };
 let keyHandler = null;
 globalThis.window = {
-  innerWidth: 800, innerHeight: 600,
+  innerWidth: 820, innerHeight: 600,
   matchMedia: () => ({ matches: false }),
   addEventListener: (type, h) => { if (type === 'keydown') keyHandler = h; },
   removeEventListener: (type) => { if (type === 'keydown') keyHandler = null; },
 };
 globalThis.document = { getElementById: () => screenMock };
 
-const { DEFAULT_SETTINGS, normalizeSettings, loadBiosSettings, saveBiosSettings,
-        cycleBootMode, adjustTimeout, showSetup } = await import('./System/BIOS/setup.js');
+const S = await import('./System/BIOS/settings.js');
+const { showSetup } = await import('./System/BIOS/setup.js');
 
 let pass = 0, fail = 0;
 function ok(c, m) { if (c) { console.log('  ✓ ' + m); pass++; } else { console.log('  ✗ ' + m); fail++; } }
 const tick = () => new Promise(r => setTimeout(r, 0));
 function key(k) { if (keyHandler) keyHandler({ key: k, preventDefault() {} }); }
-
-console.log('== 1. 纯逻辑（normalize / 边界）==');
-ok(JSON.stringify(normalizeSettings(null)) === JSON.stringify({ bootMode: 'auto', timeout: 5 }), '默认 auto/5');
-ok(normalizeSettings({ bootMode: 'gui', timeout: 99 }).timeout === 30, 'timeout 上限截到 30');
-{
-  const n = normalizeSettings({ bootMode: 'xxx', timeout: -3 });
-  ok(n.bootMode === 'auto' && n.timeout === 0, '非法 bootMode→auto；负 timeout→0');
+async function seed(obj) {
+  const vfs = new VFS();
+  await vfs.write(S.SETTINGS_PATH, JSON.stringify(obj));
+  return vfs;
 }
-ok(cycleBootMode('auto') === 'cmd' && cycleBootMode('cmd') === 'gui' && cycleBootMode('gui') === 'auto', 'cycleBootMode 正向 auto→cmd→gui→auto');
-ok(cycleBootMode('auto', -1) === 'gui', 'cycleBootMode 反向 gui');
-ok(adjustTimeout(5, 1) === 6 && adjustTimeout(0, -1) === 0 && adjustTimeout(30, 1) === 30, 'adjustTimeout 边界');
+async function readFile(vfs) { return JSON.parse(await vfs.read(S.SETTINGS_PATH)); }
 
-console.log('== 2. load / save 往返 ==');
-store.clear();
-ok(loadBiosSettings().bootMode === 'auto', '空 CMOS → 默认');
-const saved = saveBiosSettings({ bootMode: 'gui', timeout: 12 });
-ok(saved.bootMode === 'gui' && saved.timeout === 12, 'save 返回规范化结果');
-ok(loadBiosSettings().bootMode === 'gui' && loadBiosSettings().timeout === 12, 'reload 读回 gui/12');
-store.set('drapog.bios.cmos', '{bad json');
-ok(loadBiosSettings().bootMode === 'auto', '损坏 JSON → 回退默认');
+console.log('== 1. 纯逻辑 ==');
+ok(JSON.stringify(S.normalizeSettings(null)) === JSON.stringify(S.DEFAULT_SETTINGS), '默认设置');
+ok(S.normalizeSettings({ bootMode: 'gui', timeout: 99 }).timeout === 30, 'timeout 上限 30');
+ok(S.normalizeSettings({ bootMode: 'x', timeout: -1 }).bootMode === 'auto', '非法 bootMode→auto');
+ok(S.normalizeSettings({ quickPOST: 'yes' }).quickPOST === true, '非布尔 quickPOST→默认 true');
+ok(S.cycleBootMode('auto') === 'cmd' && S.cycleBootMode('gui', -1) === 'cmd', 'cycleBootMode 正/反');
+ok(S.adjustTimeout(0, -1) === 0 && S.adjustTimeout(30, 1) === 30, 'adjustTimeout 边界');
+ok(S.toggle(true) === false && S.toggle(false) === true, 'toggle');
 
-console.log('== 3. showSetup：调整 + F10 保存 ==');
-store.clear();
-const p = showSetup();
-await tick();
-ok(!!keyHandler, 'showSetup 注册了 keydown');
-key('ArrowDown');                              // → 菜单倒计时行
-key('ArrowRight'); key('ArrowRight');          // timeout 5→7
-key('ArrowUp');                                // → 回启动模式行(index 0)
-key('ArrowRight');                             // bootMode auto→cmd
-key('F10');                                    // 保存并退出
-const res = await p;
-ok(res && res.bootMode === 'cmd' && res.timeout === 7, 'F10 保存 bootMode=cmd/timeout=7');
-ok(!keyHandler, '退出后注销 keydown');
-ok(store.has('drapog.bios.cmos') && JSON.parse(store.get('drapog.bios.cmos')).bootMode === 'cmd', 'CMOS 已写入 cmd');
+console.log('== 2. 项目文件 load/save 往返 ==');
+{
+  const vfs = await seed({ bootMode: 'gui', timeout: 12, quickPOST: false, bootLogo: false, secureBoot: true });
+  const loaded = await S.loadSettings(vfs);
+  ok(loaded.bootMode === 'gui' && loaded.timeout === 12 && loaded.secureBoot === true, '从项目文件读回');
+  const saved = await S.saveSettings(vfs, { bootMode: 'cmd', timeout: 0, quickPOST: true, bootLogo: true, secureBoot: false });
+  ok(saved.bootMode === 'cmd' && saved.timeout === 0, 'save 返回规范化');
+  const reloaded = await readFile(vfs);
+  ok(reloaded.bootMode === 'cmd' && reloaded.timeout === 0 && reloaded.quickPOST === true, 'save 落盘可再读');
+  // 缺失文件 → 默认
+  const empty = new VFS();
+  ok((await S.loadSettings(empty)).bootMode === 'auto', '缺文件→默认');
+  // 损坏 JSON → 默认
+  const bad = new VFS(); await bad.write(S.SETTINGS_PATH, '{oops');
+  ok((await S.loadSettings(bad)).bootMode === 'auto', '损坏 JSON→默认');
+}
 
-console.log('== 4. showSetup：Esc 不保存 ==');
-store.clear();
-const p2 = showSetup();
-await tick();
-key('ArrowRight');     // bootMode auto→cmd（仅工作副本）
-key('Escape');         // 不保存退出
-const res2 = await p2;
-ok(res2 === null, 'Esc 返回 null（丢弃改动）');
-ok(!store.has('drapog.bios.cmos'), 'CMOS 未被写入');
+console.log('== 3. 两级菜单：进子菜单调整 + Esc 返回 + F10 保存到项目文件 ==');
+{
+  const vfs = await seed({ bootMode: 'auto', timeout: 5, quickPOST: true, bootLogo: true, secureBoot: false });
+  const p = showSetup(vfs);
+  await tick();
+  ok(!!keyHandler, 'showSetup 注册 keydown');
+  key('Enter');                 // 进入「启动设置」子菜单
+  key('ArrowRight');            // 启动模式 auto→cmd
+  key('ArrowDown');             // → 菜单倒计时
+  key('ArrowRight'); key('ArrowRight'); key('ArrowRight'); // 5→8
+  key('Escape');                // Esc 返回主菜单
+  key('ArrowDown');             // → 高级设置(index1)
+  key('Enter');                 // 进入高级
+  key('ArrowRight');            // 快速自检 true→false
+  key('Escape');                // 返回主菜单
+  key('F10');                   // 保存并退出
+  const res = await p;
+  ok(res && res.bootMode === 'cmd' && res.timeout === 8 && res.quickPOST === false, 'F10 保存 bootMode=cmd/timeout=8/quickPOST=false');
+  const f = await readFile(vfs);
+  ok(f.bootMode === 'cmd' && f.timeout === 8 && f.quickPOST === false && f.bootLogo === true && f.secureBoot === false, '项目文件已更新（其余保持）');
+}
 
-console.log('== 5. showSetup：恢复默认 ==');
-saveBiosSettings({ bootMode: 'gui', timeout: 20 });
-const p3 = showSetup();
-await tick();
-key('ArrowDown'); key('ArrowDown');   // → 恢复默认行(index 2)
-key('Enter');                          // 触发恢复默认（工作副本回 auto/5，未写 CMOS）
-ok(loadBiosSettings().bootMode === 'gui', '恢复默认未直接写 CMOS');
-key('F10');                            // 保存
-const res3 = await p3;
-ok(res3.bootMode === 'auto' && res3.timeout === 5, '恢复默认后保存 → auto/5');
+console.log('== 4. 主菜单 Esc = 不保存退出（丢弃改动）==');
+{
+  const vfs = await seed({ bootMode: 'auto', timeout: 5, quickPOST: true, bootLogo: true, secureBoot: false });
+  const p = showSetup(vfs);
+  await tick();
+  key('Enter');          // 进启动设置
+  key('ArrowRight');     // auto→cmd（仅工作副本）
+  key('Escape');         // 回主菜单
+  key('Escape');         // 主菜单 Esc = 不保存退出
+  const res = await p;
+  ok(res === null, '主菜单 Esc 返回 null');
+  const f = await readFile(vfs);
+  ok(f.bootMode === 'auto', '项目文件未被改动（仍 auto）');
+}
+
+console.log('== 5. 恢复默认设置 ==');
+{
+  const vfs = await seed({ bootMode: 'gui', timeout: 20, quickPOST: false, bootLogo: false, secureBoot: true });
+  const p = showSetup(vfs);
+  await tick();
+  for (let i = 0; i < 6; i++) key('ArrowDown');  // → 恢复默认(index 6)
+  key('Enter');                                   // 触发恢复默认（工作副本）
+  key('F10');                                     // 保存
+  const res = await p;
+  ok(JSON.stringify(res) === JSON.stringify(S.DEFAULT_SETTINGS), '恢复默认后保存 = 出厂默认');
+  const f = await readFile(vfs);
+  ok(f.bootMode === 'auto' && f.timeout === 5 && f.secureBoot === false, '项目文件重置为默认');
+}
 
 console.log('');
-if (fail === 0) console.log('BIOS Setup 验证全部通过 ✓ (' + pass + ' 项)');
+if (fail === 0) console.log('BIOS 设置（项目文件 + 两级菜单）验证全部通过 ✓ (' + pass + ' 项)');
 else { console.log(fail + ' 项失败 ✗'); process.exit(1); }

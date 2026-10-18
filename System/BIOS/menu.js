@@ -1,19 +1,15 @@
 /**
  * @file        System/BIOS/menu.js
  * @module      drapog/bios/menu
- * @summary     启动菜单（读取 BIOS 设置：默认启动项 + 倒计时；可进入 BIOS Setup）
- * @version     0.3.0
+ * @summary     启动菜单（从项目设置文件读取默认启动项 + 倒计时；可进入 BIOS Setup）
+ * @version     0.4.0
  */
 
-import { loadBiosSettings } from './setup.js';
+import { loadSettings, BOOT_LABELS } from './settings.js';
 
 const screen = document.getElementById('screen');
 
-/**
- * 设备感知：判断是否为手机 / 触控设备
- *  - 优先用 pointer:coarse（触控笔/手指，桌面鼠标是 fine）
- *  - 退而求其次：有触控点且屏幕较小
- */
+/** 设备感知：手机/触控 → GUI，电脑/鼠标 → CMD */
 function isMobileDevice() {
   try {
     if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
@@ -25,9 +21,11 @@ function isMobileDevice() {
 
 /**
  * 显示启动菜单，等待用户选择
+ * @param {import('../../drapog.vfs.js').VFS} vfs 用于读取项目设置文件
  * @returns {Promise<void>}
  */
-export function showBootMenu() {
+export async function showBootMenu(vfs) {
+  const settings = await loadSettings(vfs);
   return new Promise(resolve => {
     const ctx = screen.getContext('2d');
 
@@ -37,8 +35,6 @@ export function showBootMenu() {
       { key: '3', label: 'BIOS Setup',      desc: 'BIOS 设置',   action: 'setup' },
     ];
 
-    // 读取 BIOS 设置（CMOS）：决定默认启动项与倒计时
-    const settings = loadBiosSettings();
     const mobile = isMobileDevice();
     let selected = settings.bootMode === 'cmd' ? 0
                  : settings.bootMode === 'gui' ? 1
@@ -63,16 +59,13 @@ export function showBootMenu() {
 
       ctx.fillStyle = '#666';
       ctx.font = '14px Consolas, monospace';
-      if (countdown > 0) {
-        ctx.fillText(`自动启动倒计时: ${countdown} 秒`, x, y);
-      } else {
-        ctx.fillText('自动启动: 关闭（↑↓ 选择，Enter 确认）', x, y);
-      }
+      if (countdown > 0) ctx.fillText(`自动启动倒计时: ${countdown} 秒`, x, y);
+      else ctx.fillText('自动启动: 关闭（↑↓ 选择，Enter 确认）', x, y);
       y += 22;
       ctx.fillStyle = '#4a9';
       const reason = settings.bootMode === 'auto'
         ? (mobile ? '检测到手机/触控' : '检测到电脑/鼠标')
-        : `BIOS 设定: ${settings.bootMode.toUpperCase()}`;
+        : 'BIOS 设定 ' + BOOT_LABELS[settings.bootMode];
       ctx.fillText(`自动进入: ${items[selected].label}（${reason}）`, x, y);
       y += 34;
 
@@ -95,14 +88,14 @@ export function showBootMenu() {
     }
 
     function showFatal(err) {
-      const ctx = screen.getContext('2d');
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, screen.width, screen.height);
-      ctx.fillStyle = '#f66';
-      ctx.font = '16px Consolas, monospace';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText('启动失败: ' + (err && err.message ? err.message : err), 20, 20);
+      const c2 = screen.getContext('2d');
+      c2.fillStyle = '#000';
+      c2.fillRect(0, 0, screen.width, screen.height);
+      c2.fillStyle = '#f66';
+      c2.font = '16px Consolas, monospace';
+      c2.textAlign = 'left';
+      c2.textBaseline = 'top';
+      c2.fillText('启动失败: ' + (err && err.message ? err.message : err), 20, 20);
       console.error(err);
     }
 
@@ -114,42 +107,28 @@ export function showBootMenu() {
       } else if (it.action === 'gui') {
         import('../Boot/gui.js').then(m => m.startGUI()).then(resolve).catch(showFatal);
       } else {
-        // BIOS Setup：打开设置界面，退出后重显启动菜单（设置可能已变，重新读取）
+        // BIOS Setup：打开两级设置菜单，退出后重显启动菜单（设置可能已变，重读）
         import('./setup.js')
-          .then(m => m.showSetup())
-          .then(() => showBootMenu())
-          .catch(() => showBootMenu());
+          .then(m => m.showSetup(vfs))
+          .then(() => showBootMenu(vfs))
+          .catch(() => showBootMenu(vfs));
       }
     }
 
     function onKey(e) {
-      if (e.key === 'ArrowDown') {
-        selected = (selected + 1) % items.length;
-        countdown = initialCountdown;
-        draw();
-      } else if (e.key === 'ArrowUp') {
-        selected = (selected - 1 + items.length) % items.length;
-        countdown = initialCountdown;
-        draw();
-      } else if (e.key === 'Enter') {
-        choose(selected);
-      } else if (e.key === '1') {
-        choose(0);
-      } else if (e.key === '2') {
-        choose(1);
-      }
+      if (e.key === 'ArrowDown') { selected = (selected + 1) % items.length; countdown = initialCountdown; draw(); }
+      else if (e.key === 'ArrowUp') { selected = (selected - 1 + items.length) % items.length; countdown = initialCountdown; draw(); }
+      else if (e.key === 'Enter') { choose(selected); }
+      else if (e.key === '1') { choose(0); }
+      else if (e.key === '2') { choose(1); }
     }
 
     let timer = null;
     if (countdown > 0) {
       timer = setInterval(() => {
         countdown--;
-        if (countdown <= 0) {
-          clearInterval(timer);
-          choose(selected);
-        } else {
-          draw();
-        }
+        if (countdown <= 0) { clearInterval(timer); choose(selected); }
+        else draw();
       }, 1000);
     }
 

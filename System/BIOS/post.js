@@ -9,10 +9,13 @@ const screen = document.getElementById('screen');
 
 /**
  * 执行 POST 自检并打印结果
+ * @param {{quick?: boolean}} [opts] quick=true 时加快自检动画（BIOS 设置「快速自检」）
  * @returns {Promise<void>}
  */
-export async function runPOST() {
+export async function runPOST(opts = {}) {
   const ctx = screen.getContext('2d');
+  const perCheck = opts.quick ? 8 : 60;
+  const endPause = opts.quick ? 120 : 500;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, screen.width, screen.height);
 
@@ -47,7 +50,7 @@ export async function runPOST() {
   y += lineH * 1.5;
 
   for (const c of checks) {
-    await sleep(60);
+    await sleep(perCheck);
     let ok = false;
     try { ok = c.test(); } catch { ok = false; }
 
@@ -65,7 +68,7 @@ export async function runPOST() {
   ctx.fillStyle = '#4ec9b0';
   ctx.fillText('POST OK', x, y);
 
-  await sleep(500);
+  await sleep(endPause);
 }
 
 function sleep(ms) {

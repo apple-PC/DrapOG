@@ -1,0 +1,7 @@
+{
+  "bootMode": "auto",
+  "timeout": 5,
+  "quickPOST": true,
+  "bootLogo": true,
+  "secureBoot": false
+}

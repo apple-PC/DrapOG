@@ -11,6 +11,7 @@
 
 import { runPOST } from './post.js';
 import { showBootMenu } from './menu.js';
+import { acquireBiosVfs, loadSettings } from './settings.js';
 
 const screen = document.getElementById('screen');
 screen.width = window.innerWidth;
@@ -26,9 +27,11 @@ window.addEventListener('resize', () => {
  * BIOS 主流程
  */
 async function main() {
-  await showSplash();
-  await runPOST();
-  await showBootMenu();
+  const vfs = await acquireBiosVfs();          // 尽量挂到真实项目磁盘（设置存进项目）
+  const settings = await loadSettings(vfs);     // 从项目文件读取偏好
+  if (settings.bootLogo) await showSplash();    // 开机 Logo 可关
+  await runPOST({ quick: settings.quickPOST }); // 快速自检可关
+  await showBootMenu(vfs);
 }
 
 /**
