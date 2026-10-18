@@ -109,6 +109,7 @@
 - **L4 完善（1.1.0）**：DrapLang 支持 `import "name"` 文件级模块（多文件 app 可拆模块，registry 按 `modules` 自动拉取兄弟 `.drapp`）；`.app` 格式升级（`Info.json` 增 `author/description/category/minVersion/permissions/modules`，`entry` 支持 `.dbyte` 预编译入口，扫描校验必填字段）；Shell 新增应用管理命令 `apps`/`info`/`pack`/`install`/`uninstall`；WM `launchApp` 增加 registry 回退、dock 加入 guidemo/hello，使纯 DrapLang 应用从 dock 也能启动；新增 CLI 示例 `System/Apps/Hello.app`；`.app/main.drapp` 成为唯一真源（旧 `System/app_gui.drapp`/`app_paint.drapp` 仅留作旧测试）。test_modules.mjs(8) + test_l4.mjs(19) + test_registry.mjs(16) 全绿
 - **DrapLang 接口完善（v1.0 / 项目 1.2.0）**：为「让开发者编写实用工具/应用程序」补齐完整接口与基础工具——（1）**新增系统调用**：`fs_append/fs_copy/fs_move/fs_size/fs_isdir`（文件）、`time_sleep/time_format`（时间）、`args_count/args_get`（CLI 参数，argv[0] 默认程序名）；（2）**新增标准库内建**：`itoa`（core）、`replace/join/charAt`（str）、`sin/cos/log/exp`（math），`replace` 替换全部匹配；（3）**打通 argv 全链路**：registry→launcher→DrapSYS，CLI 退出码取 `main` 的 `i32` 返回值；（4）**源文件后缀 `.drap` → `.drapp`**：全量重命名 System/Boot/gui.js、cmd.js、shell.drapp、app_gui.drapp、app_paint.drapp、Users/guest/hello.drapp 及 System/Apps/{GuiDemo,Paint,Hello}.app/main.drapp，并同步所有引用（registry/shell/test）；（5）**编写《DrapLang 语言规范（v1.0）》**（DrapLang规范.md）：模型/词法/类型/声明/语句/表达式/标准库（core/math/str 全表）/系统调用（fs_/term_/time_/args_/win_ 全表含参数与返回值）/.app 格式/工具链命令/示例，即「编写软件」所需完整接口清单；（6）**修复 DBYTE 序列化漏掉 `BUILTIN` 指令的 bug**：预编译 `.dbyte` 产物使用内建函数会报「未知指令」，已在 drapog.dbyte.js 的 OPCODE/ARG_SPEC 补齐 `BUILTIN:48`（含 'i' 参数）。版本号：drapcc.js 1.0.0、drapog.sys.js 0.6.0、drapog.vm.js 0.8.0、drapog.dbyte.js 0.5.0。test_api.mjs 接口完整性验证（fs_/time_/builtins/argv 全绿）+ 全套 14 文件回归无回归（新增 test_tools.mjs 验证四个 drapp 工具）
 - **DrapLang 实用工具 + 运行时契约（项目 1.3.0）**：按「drapp = cmd 里的程序、app = gui 里的程序、app 可调用 drapp」的契约，新增四个运行在 cmd 的 drapp 实用工具（均为 type:cli 的 .app 包，cmd 的 `scan('System/Apps')` 自动发现，可直接 `run <名>`）：`cat <文件> [-n]`（打印文件内容、-n 行号、自动去结尾换行避免空行）、`wc <文件>`（行/词/字符统计、逐字符扫描兼容 `\r\n`）、`grep <模式> <文件>`（打印命中行）、`ls [路径]`（列目录、目录名加 /）。全部基于标准接口实现（fs_read/fs_exists/fs_isdir/fs_ls、args_count/args_get、split/contains/charAt/itoa/replace、term_print/term_println）。运行时契约：drapp 在 cmd 调用 GUI 系统调用（win_*）时，DrapSYS 因无 WM 直接安全返回（`win_create` 无 `onWinCreate` 返 0、其余 `if (!st) return 0`），即「忽略 GUI、只跑功能」已内建保障、不崩溃。验证见 test_tools.mjs 14 项全绿
+- **第二批 drapp 实用工具（项目 1.4.0）**：再增四个 cmd 工具——`head <文件> [N=10]`（前 N 行）、`tail <文件> [N=10]`（后 N 行）、`sub <文件> <旧> <新>`（文件内查找替换、sed 风格、写回）、`tree [路径]`（递归目录树，首次演示 **DrapLang 函数递归** `walk(path, depth)` 自调用）。至此 cmd 下共有 8 个 drapp 工具（cat/wc/grep/ls/head/tail/sub/tree）。新增 test_tools2.mjs（head/tail/sub/tree 共 18 项断言全绿）；全套 15 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -746,15 +747,19 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 ### DrapLang 文件级模块（L4 配套，drapcc.js 0.9.0）
 `import "name"` 现支持「文件模块」：`DrapCC(source, { modules:{name:source} })` 在解析主源后 BFS 解析各模块源，合并其函数/结构体声明（模块内禁止 entry/event）。`runDrapCli` / `launchDrapApp` 透传 `opts.modules`，registry 的 `resolve` 按 `entry.modules` 自动拉取兄弟 `.drapp`。测试 test_modules.mjs 8 项全绿（含嵌套 import、模块返回字符串、未声明模块报错）。
 
-### drapp / app 运行时契约与实用工具（项目 1.3.0）
+### drapp / app 运行时契约与实用工具（项目 1.3.0 → 1.4.0）
 - **运行时契约**：`.drapp` 是 DrapLang 源文件，运行在 **cmd**（只跑框架与功能，忽略 GUI）；`.app` 是打包格式——`type: cli` 即在 cmd 运行的 drapp 程序，`type: gui` 即在 gui 运行的 app；gui 型 app 可 `import` 共享的 `.drapp` 文件级模块（见上节「DrapLang 文件级模块」）。
 - **cmd 下忽略 GUI 已内建保障**：DrapSYS 的 `win_*` 方法在无 WM 时安全返回（`win_create` 无 `onWinCreate` 回调则返 0；`win_text/win_fill_rect/win_stroke_rect/win_set_color/win_set_font/win_button/win_label/win_input` 在 `!st` 时返 0；`win_get_event` 无当前窗口返空串）；`win_w/win_h` 无窗口返 0。所以 drapp 即便调用 GUI 也不会崩——「忽略 GUI、只跑功能」由运行时兜底。
-- **四个 cmd 实用工具**（`System/Apps/`，type:cli，cmd 的 `scan` 自动发现，`run <名>` 运行）：
+- **八个 cmd 实用工具**（`System/Apps/`，type:cli，cmd 的 `scan` 自动发现，`run <名>` 运行）：
   - `Cat.app`：`cat <文件> [-n]` —— 打印文件内容，-n 加行号（自动去结尾换行，避免 split 多出空行）。
   - `Wc.app`：`wc <文件>` —— 行/词/字符统计（逐字符扫描，兼容 `\r\n`）。
   - `Grep.app`：`grep <模式> <文件>` —— 逐行包含匹配。
-  - `Ls.app`：`ls [路径]` —— 列目录（`/`Users/guest` 为默认），目录名加 `/`。
-  - 源码均基于标准接口（fs_/args_/builtins/term_print），示例兼作「如何用 DrapLang 写软件」的参考；验证见 test_tools.mjs（cat/wc/grep/ls 共 14 项断言全绿）。
+  - `Ls.app`：`ls [路径]` —— 列目录（`/Users/guest` 为默认），目录名加 `/`。
+  - `Head.app`：`head <文件> [N=10]` —— 打印前 N 行。
+  - `Tail.app`：`tail <文件> [N=10]` —— 打印后 N 行。
+  - `Sub.app`：`sub <文件> <旧> <新>` —— 文件内查找替换（sed 风格）并写回。
+  - `Tree.app`：`tree [路径]` —— 递归打印目录树（演示 DrapLang 函数递归 `walk` 自调用）。
+  - 源码均基于标准接口（fs_/args_/builtins/term_print/函数递归），示例兼作「如何用 DrapLang 写软件」的参考；验证见 test_tools.mjs + test_tools2.mjs（共 32 项断言全绿）。
 
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
@@ -769,4 +774,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.3.0
+最后更新：2026-10-18　当前版本：1.4.0

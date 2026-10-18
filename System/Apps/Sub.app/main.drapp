@@ -1,0 +1,28 @@
+// sub —— 文件内查找替换（sed 风格），写回原文件
+// 用法: sub <文件> <旧> <新>
+// 运行: run sub <文件> <旧> <新>
+import str
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  if (n < 4) {
+    term_println("用法: sub <文件> <旧> <新>")
+    return 1
+  }
+  let path = syscall args_get(1)
+  let oldStr = syscall args_get(2)
+  let newStr = syscall args_get(3)
+  if (syscall fs_exists(path) == 0) {
+    term_println("sub: 找不到文件: " + path)
+    return 2
+  }
+  let content = syscall fs_read(path)
+  let out = replace(content, oldStr, newStr)
+  let ok = syscall fs_write(path, out)
+  if (ok == 1) {
+    term_println("已替换写入: " + path)
+    return 0
+  }
+  term_println("sub: 写入失败: " + path)
+  return 3
+}

@@ -1,0 +1,11 @@
+{
+  "id": "head",
+  "name": "Head",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "H",
+  "author": "DrapOG",
+  "description": "打印文件前 N 行（默认 10）",
+  "category": "tools"
+}

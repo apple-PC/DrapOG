@@ -1,0 +1,11 @@
+{
+  "id": "tail",
+  "name": "Tail",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "T",
+  "author": "DrapOG",
+  "description": "打印文件后 N 行（默认 10）",
+  "category": "tools"
+}

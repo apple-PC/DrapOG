@@ -1,0 +1,11 @@
+{
+  "id": "sub",
+  "name": "Sub",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "S",
+  "author": "DrapOG",
+  "description": "把文件里所有 <旧> 替换成 <新> 并写回",
+  "category": "tools"
+}

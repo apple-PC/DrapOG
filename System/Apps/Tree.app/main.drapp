@@ -1,0 +1,42 @@
+// tree —— 递归打印目录树
+// 用法: tree [路径]     默认 /Users/guest
+// 运行: run tree [路径]
+// 说明: 演示 DrapLang 函数递归（walk 自调用）；运行在 cmd，只做功能、不碰 GUI。
+import str
+
+// 递归列出 path 下的条目；depth 控制缩进
+fn walk(path: str, depth: i32) -> i32 {
+  let items = syscall fs_ls(path)
+  if (items == 0) { return 0 }
+  let names = split(items, "\n")
+  let i = 0
+  while (i < names.len) {
+    let name = names[i]
+    if (len(name) > 0) {
+      let child = path + "/" + name
+      let d = 0
+      while (d < depth) { term_print("  "); d = d + 1 }
+      if (syscall fs_isdir(child) == 1) {
+        term_println(name + "/")
+        walk(child, depth + 1)
+      } else {
+        term_println(name)
+      }
+    }
+    i = i + 1
+  }
+  return 0
+}
+
+entry fn main() -> i32 {
+  let n = syscall args_count()
+  let path = "/Users/guest"
+  if (n >= 2) { path = syscall args_get(1) }
+  if (syscall fs_isdir(path) == 0) {
+    term_println("tree: 不是目录: " + path)
+    return 1
+  }
+  term_println(path)
+  walk(path, 0)
+  return 0
+}

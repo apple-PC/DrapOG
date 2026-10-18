@@ -1,0 +1,11 @@
+{
+  "id": "tree",
+  "name": "Tree",
+  "type": "cli",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "🌳",
+  "author": "DrapOG",
+  "description": "递归打印目录树",
+  "category": "tools"
+}
