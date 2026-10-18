@@ -19,6 +19,13 @@
 import { launchDrapApp, launchDrapAppProgram, runDrapCli, runDrapCliProgram } from './drapog.launcher.js';
 import { unpack } from './drapog.dbyte.js';
 
+/** 统一应用图标：取 id 前两个字母，首字母大写、次字母小写（guidemo→Gu、calc→Ca、finder→Fi）。 */
+export function appIcon(id) {
+  const s = String(id || '');
+  if (!s) return '?';
+  return s[0].toUpperCase() + (s.length > 1 ? s[1].toLowerCase() : '');
+}
+
 // 取图标首字符作为 dock/窗口字母（emoji 计为单字符；多字符 icon 退化用 name[0]）
 function glyph(icon, name) {
   if (icon && icon.length >= 1) return icon;
@@ -35,7 +42,7 @@ export class AppRegistry {
 
   /** 注册一个内建 host 应用（实现已由 WM registerApp 提供） */
   addHost(id, { name, icon, title }) {
-    this.apps.set(id, { id, name, icon, title: title || name, type: 'host' });
+    this.apps.set(id, { id, name, icon: appIcon(id), title: title || name, type: 'host' });
   }
 
   /** 注册一个 DrapLang 应用：type 'gui' 交 WM，'cli' 跑终端。
@@ -44,7 +51,7 @@ export class AppRegistry {
   addDrap(id, { name, icon, type, file, baseUrl, modules, version, author, description, category }) {
     const url = file ? new URL(file, baseUrl).href : null;
     this.apps.set(id, {
-      id, name, icon, type,
+      id, name, icon: appIcon(id), type,
       url,
       baseUrl: baseUrl || null,
       modules: modules || [],
@@ -57,7 +64,9 @@ export class AppRegistry {
 
   /** 注册一个 VFS 路径型 DrapLang 应用（mount 模式下由扫描发现）。info 含 name/icon/type/entry 等全量字段 */
   addDrapVfs(id, info) {
-    this.apps.set(id, Object.assign({ id, type: info.type || 'gui' }, info));
+    const rec = Object.assign({ id, type: info.type || 'gui' }, info);
+    rec.icon = appIcon(id);   // 统一图标：忽略 Info.json 里的 icon，用前两字母
+    this.apps.set(id, rec);
   }
 
   /** 通用注册（install 命令用）：直接塞一个完整 app 记录 */

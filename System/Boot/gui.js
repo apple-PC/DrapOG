@@ -47,7 +47,7 @@ export function startGUI(opts = {}) {
     // VFS：优先用外部传的，否则新建
     const vfs = opts.vfs || new VFS();
 
-    const wm = new WindowManager(screen);
+    const wm = new WindowManager(screen, { theme: opts.theme });
 
     // 应用注册表（L4：整合 draplang 工具 + 制定 .app 格式）
     const registry = new AppRegistry();
@@ -60,14 +60,8 @@ export function startGUI(opts = {}) {
     registry.addHost('settings', { name: '设置',         icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
-    // DrapLang 应用（内存模式下用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 .app 包覆盖）
-    // .app/main.drapp 是唯一真源（System/app_gui.drapp / app_paint.drapp 保留仅供旧测试）
-    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
-      file: '../Apps/GuiDemo.app/main.drapp', baseUrl: import.meta.url,
-      version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
-    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
-      file: '../Apps/Paint.app/main.drapp', baseUrl: import.meta.url,
-      version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
+    // DrapLang 应用（内存模式用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 scan 覆盖）
+    // 演示/调色板类应用（GuiDemo/Paint）已移除，只保留实用应用。
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
       file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
@@ -177,8 +171,8 @@ export function startGUI(opts = {}) {
     wm.launchApp({ id: 'finder',   letter: 'F', title: 'Finder' });
     wm.launchApp({ id: 'terminal', letter: '>', title: 'Terminal' });
 
-    // 自举验证：自动启动一个用 DrapLang 编写的 GUI 应用（证明 GUI 能由 DrapLang 自举）
-    registry.launch('guidemo', { wm, vfs }).catch(err => console.warn('DrapLang 示例加载失败（可忽略）', err));
+  // 自举验证：自动启动一个用 DrapLang 编写的 GUI 应用（证明 GUI 能由 DrapLang 自举）
+  registry.launch('calc', { wm, vfs }).catch(err => console.warn('DrapLang 示例加载失败（可忽略）', err));
 
     let running = true;
     function loop() {

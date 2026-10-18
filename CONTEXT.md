@@ -113,6 +113,12 @@
 - **L5 首个 GUI 应用：Calc 计算器（项目 1.5.0）**：正式进入 L5「GUI 使用」。新增 `System/Apps/Calc.app`（type:gui）——用 **win_gui 控件框架 + event fn** 编写的计算器（on_paint 声明标题/显示屏/4×4 按钮网格，on_click 驱动左结合整数状态机，除零保护）；并**首次落地「app 调用 drapp」**：Calc 这个 GUI 应用通过 `import "calcutil"` 复用兄弟模块 `calcutil.drapp` 的 `apply(a,o,b)`（算术核心，除零返回 0）。已接入 GUI：gui.js `addDrap('calc', {type:'gui', modules:['calcutil']})`、WM dock 加 🧮 Calc 图标、AppMgr 经 scan 自动展示。新增 test_calc.mjs（编译+import 模块+注入 click 读显示屏 label，覆盖 2+3 / 5×4 / 10-3-2 / 8÷0 / 多位 / clear / 停机 共 14 断言全绿）；全套 16 个测试文件回归无回归
 - **BIOS Setup 固件设置（项目 1.6.0）**：实现启动菜单里原本「未实现」的 BIOS Setup。新增 `System/BIOS/setup.js`——canvas 风格固件设置界面（↑↓ 选择 / ←→ 调整 / Enter 确认 / F10 保存并退出 / Esc 不保存退出）。可配置：**启动模式**（自动按设备 / 强制 CMD / 强制 GUI）、**菜单倒计时**（0–30 秒，0=一直等待）、恢复默认。因 BIOS 运行在 VFS 挂载之前，设置持久化到 **localStorage（相当于 CMOS/NVRAM，键 `drapog.bios.cmos`）**；`menu.js` 改为读取该设置决定默认启动项与倒计时（倒计时 0 则关闭自动启动、等待用户），Setup 退出后重显菜单。新增 test_bios.mjs（mock 浏览器环境，纯逻辑 + showSetup 交互共 18 断言全绿）；全套 17 个测试文件回归无回归
 - **L5 GUI 应用：Conv 进制转换器（项目 1.7.0）**：再增一个 GUI 应用 `System/Apps/Conv.app`（type:gui）——输入十进制数，点按钮转二/八/十六进制。**又一次「app 调用 drapp」**：`import "baseconv"` 复用 `baseconv.drapp` 的 `toBase(n, base)`（反复取余构串，整数精确，含 0/负数处理）。on_paint 声明输入框 + 结果 + 三个中文按钮，on_click 读输入→atoi→toBase→win_invalidate 重绘。已接入 dock/gui.js。新增 test_conv.mjs（setInputValue 设输入 + 注入 click + 读结果 label，7 断言全绿）；全套 18 个测试文件回归无回归
+- **主题系统 + 图标统一 + 清理演示应用（项目 1.8.0）**：
+  - **`gui <theme>` 命令**：shell 的 `gui` 现接受主题标识符——`gui macos` / `gui windows`（`>gui windows` 进 Windows 桌面）；经 `switchToGUI(theme)` → `startGUI({theme})` → WM。
+  - **Windows GUI 主题（起始）**：WM 引入 THEMES 配置并按主题渲染 chrome——macOS=顶部菜单栏 + 底部居中 dock + 左上三色圆点控件 + 紫蓝壁纸；Windows=无顶部栏 + 底部任务栏（Start 四格标 + 应用图标 + 最小化窗口 + 时钟）+ 右上方形 min/max/close 控件 + 蓝色壁纸。窗口最大化/拖动按各自工作区计算。DrapLang 应用自绘内容（主题无关），宿主 chrome 随主题切换——两套主题下 app 界面均正确使用。
+  - **图标统一**：新增 `appIcon(id)`——取 id 前两个字母、首字母大写次字母小写（finder→Fi、calc→Ca、conv→Co）；registry（host/drap/scan）与 WM dock 全部改用，弃用 emoji/杂字。
+  - **删除演示/调色板应用**：移除 `GuiDemo.app`、`Paint.app`（及 dock/registry/自动启动引用；自举改自动启动 Calc）。`System/app_gui.drapp`/`app_paint.drapp` 保留仅供 test_gui/test_paint。
+  - 新增 test_theme.mjs（appIcon / normalizeTheme / WM 两主题工作区与控件位置 / 任务栏布局 / gui 命令传参，19 断言全绿）；全套 19 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -790,4 +796,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.7.0
+最后更新：2026-10-18　当前版本：1.8.0

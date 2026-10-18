@@ -279,7 +279,7 @@ export class DrapShell {
       case 'echo':    return this.io.print(args.join(' '));
       case 'run':     return await this._cmdRun(args);
       case 'exit':    return this.io.exit();
-      case 'gui':     return this.io.switchToGUI();
+      case 'gui':     return this.io.switchToGUI(args[0]);
       case 'save':    return await this._cmdSave(args);
       case 'load':    return await this._cmdLoad(args);
       case 'dump':    return await this._cmdDump(args);
@@ -360,6 +360,7 @@ export class DrapShell {
       '    clear             清屏',
       '    echo <text>       输出文本',
       '    exit              退出',
+      '    gui [macos|windows]  进入图形界面（可指定主题，默认 macos）',
       '',
       '  文件',
       '    pwd               打印当前目录',

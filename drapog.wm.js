@@ -5,8 +5,26 @@
  * @version     0.6.0
  */
 
+import { appIcon } from './drapog.registry.js';
+
+/** 规范化主题标识：'windows'/'win' → windows，其余 → macos */
+export function normalizeTheme(t) {
+  return (t === 'windows' || t === 'win') ? 'windows' : 'macos';
+}
+
+/** 主题外观配置：窗口控件位置/样式、顶部菜单栏 vs 无、底部 dock vs 任务栏、壁纸渐变 */
+const THEMES = {
+  macos:   { controlsSide: 'left',  controls: 'circles', topBar: 'menubar', bottomBar: 'dock',
+             wall: ['#1b2a4a', '#3a1c4a', '#0d0d12'] },
+  windows: { controlsSide: 'right', controls: 'squares', topBar: 'none',    bottomBar: 'taskbar',
+             wall: ['#0a3d91', '#0f6cbd', '#04122b'] },
+};
+
 export class WindowManager {
-  constructor(canvas) {
+  constructor(canvas, opts = {}) {
+    this.theme = normalizeTheme(opts.theme);
+    this.T = THEMES[this.theme];
+    this.TASKBAR_H = 48;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.windows = [];
@@ -23,19 +41,13 @@ export class WindowManager {
     // 软键盘（移动端调用实体键盘用）
     this.softKeyboard = { open: false };
 
-    this.apps = [
-      { id: 'finder',   letter: 'F', title: 'Finder' },
-      { id: 'terminal', letter: '>', title: 'Terminal' },
-      { id: 'guidemo',  letter: '◆', title: 'DrapApp 示例' },
-      { id: 'paint',    letter: '🎨', title: 'Paint' },
-      { id: 'hello',    letter: 'H', title: 'Hello' },
-      { id: 'calc',     letter: '🧮', title: 'Calc' },
-      { id: 'conv',     letter: '🔟', title: 'Conv' },
-      { id: 'appmgr',   letter: '◆', title: '应用' },
-      { id: 'edit',     letter: 'T', title: 'TextEdit' },
-      { id: 'settings', letter: '⚙', title: 'Settings' },
-      { id: 'about',    letter: 'W', title: '关于本机' },
-    ];
+    // dock 应用（图标统一为 id 前两字母；guidemo/paint 演示应用已移除）
+    const TITLES = {
+      finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
+      conv: 'Conv', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
+    };
+    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'appmgr', 'edit', 'settings', 'about']
+      .map(id => ({ id, letter: appIcon(id), title: TITLES[id] }));
 
     this._appImpls = new Map();   // appId -> 实现
   }
@@ -111,10 +123,11 @@ export class WindowManager {
       w.maximized = false;
     } else {
       w.prevRect = { x: w.x, y: w.y, w: w.w, h: w.h };
+      const wa = this.workArea();
       w.x = 0;
-      w.y = this.MENU_BAR_H;
+      w.y = wa.top;
       w.w = this.W();
-      w.h = this.H() - this.MENU_BAR_H - this.DOCK_H - this.DOCK_MARGIN * 2;
+      w.h = this.H() - wa.top - wa.bottom;
       w.maximized = true;
     }
   }
@@ -145,8 +158,23 @@ export class WindowManager {
     return null;
   }
 
+  // 可用工作区（顶部菜单栏 / 底部 dock 或任务栏之外）
+  workArea() {
+    const top = this.T.topBar === 'menubar' ? this.MENU_BAR_H : 0;
+    const bottom = this.T.bottomBar === 'dock' ? (this.DOCK_H + this.DOCK_MARGIN * 2) : this.TASKBAR_H;
+    return { top, bottom };
+  }
+
   btnPositions(w) {
     const cy = w.y + w.TITLEBAR_H / 2;
+    if (this.T.controlsSide === 'right') {
+      const cx = w.x + w.w - 20;   // Windows：关放在最右
+      return {
+        close:    { x: cx,      y: cy, r: 6 },
+        minimize: { x: cx - 20, y: cy, r: 6 },
+        maximize: { x: cx - 40, y: cy, r: 6 },
+      };
+    }
     const cx = w.x + 20;
     return {
       close:    { x: cx,      y: cy, r: 6 },
@@ -210,8 +238,8 @@ export class WindowManager {
   }
 
   onMouseDown(x, y) {
-    // 菜单栏（顶部）：键盘切换按钮命中区
-    if (y < this.MENU_BAR_H) {
+    // 菜单栏（macOS 顶部）：键盘切换按钮命中区
+    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) {
       if (this.hitMenuBar(x, y)) this.toggleSoftKeyboard();
       return;   // 菜单栏区域不穿透到下方窗口
     }
@@ -222,11 +250,22 @@ export class WindowManager {
       if (k) { this._pressKey(k); return; }
     }
 
-    const hitD = this.hitDock(x, y);
-    if (hitD) {
-      if (hitD.type === 'app') this.launchApp(hitD.app);
-      else if (hitD.type === 'mini') this.restoreWindow(hitD.win.id);
-      return;
+    // 底部栏：macOS dock / Windows 任务栏
+    if (this.T.bottomBar === 'dock') {
+      const hitD = this.hitDock(x, y);
+      if (hitD) {
+        if (hitD.type === 'app') this.launchApp(hitD.app);
+        else if (hitD.type === 'mini') this.restoreWindow(hitD.win.id);
+        return;
+      }
+    } else {
+      const hitT = this.hitTaskbar(x, y);
+      if (hitT) {
+        if (hitT.type === 'start') this.launchApp({ id: 'appmgr', letter: 'Ap', title: '应用' });
+        else if (hitT.type === 'app') this.launchApp(hitT.app);
+        else if (hitT.type === 'mini') this.restoreWindow(hitT.win.id);
+        return;
+      }
     }
 
     const w = this.hitTest(x, y);
@@ -261,7 +300,7 @@ export class WindowManager {
     this.dragState.moved = true;
     w.x = x - this.dragState.offsetX;
     w.y = y - this.dragState.offsetY;
-    if (w.y < this.MENU_BAR_H) w.y = this.MENU_BAR_H;
+    if (w.y < this.workArea().top) w.y = this.workArea().top;
     if (w.x < 0) w.x = 0;
     if (w.x + w.w > this.W()) w.x = this.W() - w.w;
   }
@@ -297,10 +336,10 @@ export class WindowManager {
 
   getCursor(x, y) {
     if (this.dragState) return 'grabbing';
-    if (y < this.MENU_BAR_H && this.hitMenuBar(x, y)) return 'pointer';
+    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H && this.hitMenuBar(x, y)) return 'pointer';
     if (this.softKeyboard.open && this.hitSoftKeyboard(x, y)) return 'pointer';
-    const hitD = this.hitDock(x, y);
-    if (hitD) return 'pointer';
+    if (this.T.bottomBar === 'dock') { if (this.hitDock(x, y)) return 'pointer'; }
+    else { if (this.hitTaskbar(x, y)) return 'pointer'; }
     const w = this.hitTest(x, y);
     if (!w) return 'default';
     if (this.hitButton(w, x, y)) return 'pointer';
@@ -447,17 +486,19 @@ export class WindowManager {
       const w = this.windows.find(w => w.id === id);
       if (w && !w.minimized) this.renderWindow(w);
     }
-    this.renderMenuBar(W);
-    this.renderDock(W, H);
+    if (this.T.topBar === 'menubar') this.renderMenuBar(W);
+    if (this.T.bottomBar === 'dock') this.renderDock(W, H);
+    else this.renderTaskbar(W, H);
     this.renderSoftKeyboard(W, H);
   }
 
   renderWallpaper(W, H) {
     const ctx = this.ctx;
+    const [c0, c1, c2] = this.T.wall;
     const g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#1b2a4a');
-    g.addColorStop(0.45, '#3a1c4a');
-    g.addColorStop(1, '#0d0d12');
+    g.addColorStop(0, c0);
+    g.addColorStop(0.45, c1);
+    g.addColorStop(1, c2);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, H);
   }
@@ -519,56 +560,48 @@ export class WindowManager {
     ctx.textBaseline = 'middle';
     ctx.fillText(w.title, w.x + w.w / 2, w.y + w.TITLEBAR_H / 2);
 
-    // 三色按钮
+    // 窗口控件（主题：macOS 三色圆点 / Windows 方形按钮）
     const p = this.btnPositions(w);
     const alpha = focused ? 1 : 0.6;
     ctx.globalAlpha = alpha;
-    this.drawCircle(p.close.x, p.close.y, p.close.r, '#ff5f57');
-    this.drawCircle(p.minimize.x, p.minimize.y, p.minimize.r, '#febc2e');
-    this.drawCircle(p.maximize.x, p.maximize.y, p.maximize.r, '#28c840');
-    ctx.globalAlpha = 1;
-
-    // 按钮符号
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.lineWidth = 1.4;
-    ctx.lineCap = 'round';
-    // ×
-    {
-      const cx = p.close.x, cy = p.close.y, r = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
-      ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
-      ctx.stroke();
-    }
-    // ─
-    {
-      const cx = p.minimize.x, cy = p.minimize.y, r = 3;
-      ctx.beginPath();
-      ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
-      ctx.stroke();
-    }
-    // ⤢ 两对角箭头
-    {
-      const cx = p.maximize.x, cy = p.maximize.y, r = 3.2;
-      const s = r * 0.7;
-      // 左上
-      ctx.beginPath();
-      ctx.moveTo(cx - r, cy - r);
-      ctx.lineTo(cx - r + s, cy - r);
-      ctx.moveTo(cx - r, cy - r);
-      ctx.lineTo(cx - r, cy - r + s);
-      ctx.moveTo(cx - r, cy - r);
-      ctx.lineTo(cx - r + s * 0.55, cy - r + s * 0.55);
-      ctx.stroke();
-      // 右下
-      ctx.beginPath();
-      ctx.moveTo(cx + r, cy + r);
-      ctx.lineTo(cx + r - s, cy + r);
-      ctx.moveTo(cx + r, cy + r);
-      ctx.lineTo(cx + r, cy + r - s);
-      ctx.moveTo(cx + r, cy + r);
-      ctx.lineTo(cx + r - s * 0.55, cy + r - s * 0.55);
-      ctx.stroke();
+    if (this.T.controls === 'circles') {
+      this.drawCircle(p.close.x, p.close.y, p.close.r, '#ff5f57');
+      this.drawCircle(p.minimize.x, p.minimize.y, p.minimize.r, '#febc2e');
+      this.drawCircle(p.maximize.x, p.maximize.y, p.maximize.r, '#28c840');
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      { const cx = p.close.x, cy = p.close.y, r = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
+        ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r);
+        ctx.stroke(); }
+      { const cx = p.minimize.x, cy = p.minimize.y, r = 3;
+        ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke(); }
+      { const cx = p.maximize.x, cy = p.maximize.y, r = 3.2; const s = r * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx - r + s, cy - r);
+        ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx - r, cy - r + s);
+        ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx - r + s * 0.55, cy - r + s * 0.55);
+        ctx.moveTo(cx + r, cy + r); ctx.lineTo(cx + r - s, cy + r);
+        ctx.moveTo(cx + r, cy + r); ctx.lineTo(cx + r, cy + r - s);
+        ctx.moveTo(cx + r, cy + r); ctx.lineTo(cx + r - s * 0.55, cy + r - s * 0.55);
+        ctx.stroke(); }
+    } else {
+      const bs = 26;   // Windows 方形按钮命中/绘制边长
+      this.drawSquareBtn(p.minimize.x, p.minimize.y, bs, focused ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)');
+      this.drawSquareBtn(p.maximize.x, p.maximize.y, bs, focused ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)');
+      this.drawSquareBtn(p.close.x, p.close.y, bs, 'rgba(232,17,35,0.9)');
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+      ctx.lineWidth = 1.3; ctx.lineCap = 'round';
+      { const cx = p.minimize.x, cy = p.minimize.y;
+        ctx.beginPath(); ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy); ctx.stroke(); }
+      { const cx = p.maximize.x, cy = p.maximize.y, r = 4; ctx.strokeRect(cx - r, cy - r, r * 2, r * 2); }
+      { const cx = p.close.x, cy = p.close.y, r = 4;
+        ctx.beginPath(); ctx.moveTo(cx - r, cy - r); ctx.lineTo(cx + r, cy + r);
+        ctx.moveTo(cx + r, cy - r); ctx.lineTo(cx - r, cy + r); ctx.stroke(); }
     }
   }
 
@@ -578,6 +611,92 @@ export class WindowManager {
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = fill;
     ctx.fill();
+  }
+
+  // Windows 风方形窗口按钮（以 cx,cy 为中心）
+  drawSquareBtn(cx, cy, size, fill) {
+    const ctx = this.ctx;
+    const x = cx - size / 2, y = cy - size / 2;
+    ctx.beginPath();
+    this.roundRect(x, y, size, size, 4);
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+
+  /* ---------- Windows 任务栏（底部） ---------- */
+  taskbarLayout() {
+    const H = this.H();
+    const ty = H - this.TASKBAR_H;
+    const cy = ty + this.TASKBAR_H / 2;
+    const start = { x: 8, y: cy - 16, w: 36, h: 32 };
+    const apps = [];
+    let ix = 48;
+    for (const app of this.apps) { apps.push({ app, x: ix, y: cy - 16, w: 32, h: 32 }); ix += 36; }
+    const minis = [];
+    let mx = ix + 8;
+    for (const w of this.minimizedWindows()) { minis.push({ win: w, x: mx, y: cy - 14, w: 92, h: 28 }); mx += 96; }
+    return { ty, cy, start, apps, minis };
+  }
+
+  renderTaskbar(W) {
+    const ctx = this.ctx;
+    const L = this.taskbarLayout();
+    const { ty, cy } = L;
+    ctx.fillStyle = 'rgba(18, 18, 22, 0.94)';
+    ctx.fillRect(0, ty, W, this.TASKBAR_H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(W, ty); ctx.stroke();
+
+    // Start 按钮（四格蓝方块）
+    const sx = L.start.x + 8, q = 5, gap = 2.5, sy = cy - (q * 2 + gap) / 2;
+    ctx.fillStyle = '#4fc1ff';
+    ctx.fillRect(sx, sy, q, q);
+    ctx.fillRect(sx + q + gap, sy, q, q);
+    ctx.fillRect(sx, sy + q + gap, q, q);
+    ctx.fillRect(sx + q + gap, sy + q + gap, q, q);
+
+    // 应用图标
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const it of L.apps) {
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      this.roundRect(it.x, it.y, it.w, it.h, 6); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.font = '600 12px -apple-system, "Segoe UI", sans-serif';
+      ctx.fillText(it.app.letter, it.x + it.w / 2, cy + 1);
+    }
+    // 最小化窗口
+    for (const it of L.minis) {
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      this.roundRect(it.x, it.y, it.w, it.h, 6); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = '12px -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(String(it.win.title).slice(0, 12), it.x + 8, cy);
+      ctx.textAlign = 'center';
+    }
+    // 时钟（右）
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '13px -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(hh + ':' + mm, W - 14, cy);
+    ctx.textAlign = 'left';
+  }
+
+  hitTaskbar(x, y) {
+    const L = this.taskbarLayout();
+    if (y < L.ty) return null;
+    if (x >= L.start.x && x < L.start.x + L.start.w && y >= L.start.y && y < L.start.y + L.start.h) return { type: 'start' };
+    for (const it of L.apps) {
+      if (x >= it.x && x < it.x + it.w && y >= it.y && y < it.y + it.h) return { type: 'app', app: it.app };
+    }
+    for (const it of L.minis) {
+      if (x >= it.x && x < it.x + it.w && y >= it.y && y < it.y + it.h) return { type: 'mini', win: it.win };
+    }
+    return null;
   }
 
   renderMenuBar(W) {

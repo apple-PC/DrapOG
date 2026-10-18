@@ -1,8 +1,0 @@
-{
-  "id": "paint",
-  "name": "Paint",
-  "icon": "🎨",
-  "type": "gui",
-  "entry": "main.drapp",
-  "version": "1.0"
-}

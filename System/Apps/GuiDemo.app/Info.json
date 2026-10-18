@@ -1,8 +1,0 @@
-{
-  "id": "guidemo",
-  "name": "DrapApp 示例",
-  "icon": "◆",
-  "type": "gui",
-  "entry": "main.drapp",
-  "version": "1.0"
-}

@@ -28,12 +28,6 @@ export function startCMD() {
     registry.addHost('settings', { name: '设置',     icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机', icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',     icon: '◆',  title: '应用' });
-    registry.addDrap('guidemo', { name: 'DrapApp 示例', icon: '◆', type: 'gui',
-      file: '../Apps/GuiDemo.app/main.drapp', baseUrl: import.meta.url,
-      version: '1.0', author: 'DrapOG', description: 'DrapLang GUI 示例', category: 'demo' });
-    registry.addDrap('paint',    { name: 'Paint',        icon: '🎨', type: 'gui',
-      file: '../Apps/Paint.app/main.drapp', baseUrl: import.meta.url,
-      version: '1.0', author: 'DrapOG', description: 'DrapLang 调色板', category: 'graphics' });
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
       file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
@@ -284,10 +278,10 @@ export function startCMD() {
       print: s => { pushLine(s); draw(); },
       clear: () => { state.lines = []; state.scrollTop = 0; draw(); },
       exit: () => { cleanup(); resolve(); },
-      switchToGUI: async () => {
+      switchToGUI: async (theme) => {
         cleanup();
         const { startGUI } = await import('./gui.js');
-        await startGUI({ vfs });
+        await startGUI({ vfs, theme });
       },
       getDemoSource,
     });
