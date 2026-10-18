@@ -177,8 +177,8 @@ export class WindowManager {
       const cx = w.x + w.w - 20;   // Windows：关放在最右
       return {
         close:    { x: cx,      y: cy, r: 6 },
-        minimize: { x: cx - 20, y: cy, r: 6 },
-        maximize: { x: cx - 40, y: cy, r: 6 },
+        minimize: { x: cx - 26, y: cy, r: 6 },
+        maximize: { x: cx - 52, y: cy, r: 6 },
       };
     }
     const cx = w.x + 20;
@@ -244,8 +244,16 @@ export class WindowManager {
   }
 
   onMouseDown(x, y) {
-    // 菜单栏（macOS 顶部）：键盘切换按钮命中区
+    // 锁屏 / 关机覆盖层优先
+    if (this.locked) { this.unlock(); return; }
+    if (this.shutdown) { this.powerOn(); return; }
+
+    // 主菜单打开：命中项则执行，否则关闭并吞掉本次点击
+    if (this.menu) { this.runMenuAction(this.hitMenu(x, y)); return; }
+
+    // macOS：Apple 标志开主菜单；菜单栏其它区域（键盘按钮）
     if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) {
+      if (this.hitAppleLogo(x, y)) { this.toggleMenu('apple'); return; }
       if (this.hitMenuBar(x, y)) this.toggleSoftKeyboard();
       return;   // 菜单栏区域不穿透到下方窗口
     }
@@ -267,7 +275,7 @@ export class WindowManager {
     } else {
       const hitT = this.hitTaskbar(x, y);
       if (hitT) {
-        if (hitT.type === 'start') this.launchApp({ id: 'appmgr', letter: 'Ap', title: '应用' });
+        if (hitT.type === 'start') this.toggleMenu('start');   // Start 开主菜单（不再直接开 AppMgr）
         else if (hitT.type === 'app') this.launchApp(hitT.app);
         else if (hitT.type === 'mini') this.restoreWindow(hitT.win.id);
         return;
@@ -328,6 +336,9 @@ export class WindowManager {
   }
 
   onKeyDown(e) {
+    if (this.locked) { this.unlock(); return; }
+    if (this.shutdown) { this.powerOn(); return; }
+    if (this.menu && e.key === 'Escape') { this.closeMenu(); return; }
     if (!this.focusedId) return;
     const w = this.windows.find(w => w.id === this.focusedId);
     if (!w || w.minimized) return;
@@ -342,7 +353,9 @@ export class WindowManager {
 
   getCursor(x, y) {
     if (this.dragState) return 'grabbing';
-    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H && this.hitMenuBar(x, y)) return 'pointer';
+    if (this.locked || this.shutdown) return 'pointer';
+    if (this.menu && this.hitMenu(x, y)) return 'pointer';
+    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H && (this.hitAppleLogo(x, y) || this.hitMenuBar(x, y))) return 'pointer';
     if (this.softKeyboard.open && this.hitSoftKeyboard(x, y)) return 'pointer';
     if (this.T.bottomBar === 'dock') { if (this.hitDock(x, y)) return 'pointer'; }
     else { if (this.hitTaskbar(x, y)) return 'pointer'; }
@@ -496,6 +509,9 @@ export class WindowManager {
     if (this.T.bottomBar === 'dock') this.renderDock(W, H);
     else this.renderTaskbar(W, H);
     this.renderSoftKeyboard(W, H);
+    if (this.menu) this.renderMenu();
+    if (this.locked) this.renderLock();
+    if (this.shutdown) this.renderShutdown();
   }
 
   renderWallpaper(W, H) {
@@ -595,7 +611,7 @@ export class WindowManager {
         ctx.moveTo(cx + r, cy + r); ctx.lineTo(cx + r - s * 0.55, cy + r - s * 0.55);
         ctx.stroke(); }
     } else {
-      const bs = 26;   // Windows 方形按钮命中/绘制边长
+      const bs = 22;   // Windows 方形按钮命中/绘制边长（< 26 间距，避免重叠）
       this.drawSquareBtn(p.minimize.x, p.minimize.y, bs, focused ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)');
       this.drawSquareBtn(p.maximize.x, p.maximize.y, bs, focused ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)');
       this.drawSquareBtn(p.close.x, p.close.y, bs, 'rgba(232,17,35,0.9)');
@@ -703,6 +719,158 @@ export class WindowManager {
       if (x >= it.x && x < it.x + it.w && y >= it.y && y < it.y + it.h) return { type: 'mini', win: it.win };
     }
     return null;
+  }
+
+  /* ---------- 主菜单（macOS Apple 菜单 / Windows 开始菜单）+ 电源/锁屏 ---------- */
+  hitAppleLogo(x, y) { return x >= 8 && x < 34 && y >= 4 && y < this.MENU_BAR_H - 4; }
+  toggleMenu(kind) { this.menu = (this.menu && this.menu.kind === kind) ? null : { kind }; }
+  closeMenu() { this.menu = null; }
+
+  appleMenuLayout() {
+    const items = [
+      { label: '关于本机', action: 'about' },
+      { label: '系统设置...', action: 'settings' },
+      { sep: true },
+      { label: '锁定屏幕', action: 'lock' },
+      { label: '重新启动...', action: 'restart' },
+      { label: '关机...', action: 'shutdown' },
+    ];
+    const w = 220, rowH = 26, pad = 8;
+    let h = pad * 2;
+    for (const it of items) h += it.sep ? 12 : rowH;
+    return { x: 6, y: this.MENU_BAR_H, w, h, items, rowH, pad };
+  }
+  startMenuLayout() {
+    const H = this.H();
+    const cols = 4, iconS = 44, gap = 10, pad = 14;
+    const rows = Math.ceil(this.apps.length / cols);
+    const gridH = rows * (iconS + 22) + (rows - 1) * gap;
+    const powerH = 42;
+    const power = [
+      { label: '锁定', action: 'lock' },
+      { label: '注销', action: 'logout' },
+      { label: '重启', action: 'restart' },
+      { label: '关机', action: 'shutdown' },
+    ];
+    const w = 340;
+    const h = pad + 32 + gridH + 14 + powerH + pad;
+    return { x: 6, y: H - this.TASKBAR_H - h - 6, w, h, cols, iconS, gap, pad, power, powerH };
+  }
+  hitMenu(x, y) {
+    if (!this.menu) return null;
+    if (this.menu.kind === 'apple') {
+      const L = this.appleMenuLayout();
+      if (x < L.x || x > L.x + L.w || y < L.y || y > L.y + L.h) return null;
+      let iy = L.y + L.pad;
+      for (const it of L.items) {
+        const h = it.sep ? 12 : L.rowH;
+        if (!it.sep && y >= iy && y < iy + h) return it.action;
+        iy += h;
+      }
+      return null;
+    }
+    const L = this.startMenuLayout();
+    if (x < L.x || x > L.x + L.w || y < L.y || y > L.y + L.h) return null;
+    const py = L.y + L.h - L.pad - L.powerH;
+    if (y >= py) {
+      const cw = (L.w - L.pad * 2) / L.power.length;
+      const idx = Math.floor((x - L.x - L.pad) / cw);
+      return (idx >= 0 && idx < L.power.length) ? L.power[idx].action : null;
+    }
+    const gx = L.x + L.pad, gy = L.y + L.pad + 32;
+    const cellW = L.iconS + L.gap, cellH = L.iconS + 22 + L.gap;
+    for (let i = 0; i < this.apps.length; i++) {
+      const c = i % L.cols, r = Math.floor(i / L.cols);
+      const ax = gx + c * cellW, ay = gy + r * cellH;
+      if (x >= ax && x < ax + L.iconS && y >= ay && y < ay + L.iconS + 22) return { launch: this.apps[i].id };
+    }
+    return null;
+  }
+  runMenuAction(a) {
+    this.closeMenu();
+    if (!a) return;
+    if (typeof a === 'object' && a.launch) {
+      const app = this.apps.find(x => x.id === a.launch);
+      this.launchApp(app || { id: a.launch, letter: appIcon(a.launch), title: a.launch });
+      return;
+    }
+    switch (a) {
+      case 'about': this.launchApp({ id: 'about', letter: 'Ab', title: '关于本机' }); break;
+      case 'settings': this.launchApp({ id: 'settings', letter: 'Se', title: '设置' }); break;
+      case 'lock': this.locked = true; this._loggedOut = false; break;
+      case 'logout': this.locked = true; this._loggedOut = true; break;
+      case 'restart': if (typeof location !== 'undefined') location.reload(); break;
+      case 'shutdown': this.shutdown = true; break;
+    }
+  }
+  unlock() { this.locked = false; this._loggedOut = false; }
+  powerOn() { if (typeof location !== 'undefined') location.reload(); }
+
+  renderMenu() {
+    const ctx = this.ctx;
+    if (this.menu.kind === 'apple') {
+      const L = this.appleMenuLayout();
+      ctx.fillStyle = 'rgba(30,30,36,0.98)'; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.stroke();
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      let iy = L.y + L.pad;
+      for (const it of L.items) {
+        const h = it.sep ? 12 : L.rowH;
+        if (it.sep) { ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(L.x + 8, iy + 6); ctx.lineTo(L.x + L.w - 8, iy + 6); ctx.stroke(); }
+        else { ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '14px -apple-system, sans-serif'; ctx.fillText(it.label, L.x + 14, iy + h / 2); }
+        iy += h;
+      }
+    } else {
+      const L = this.startMenuLayout();
+      ctx.fillStyle = 'rgba(24,24,30,0.98)'; this.roundRect(L.x, L.y, L.w, L.h, 10); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; this.roundRect(L.x, L.y, L.w, L.h, 10); ctx.stroke();
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '600 14px "Segoe UI", sans-serif';
+      ctx.fillText('应用', L.x + L.pad, L.y + L.pad + 16);
+      const gx = L.x + L.pad, gy = L.y + L.pad + 32;
+      const cellW = L.iconS + L.gap, cellH = L.iconS + 22 + L.gap;
+      ctx.textAlign = 'center';
+      for (let i = 0; i < this.apps.length; i++) {
+        const c = i % L.cols, r = Math.floor(i / L.cols);
+        const ax = gx + c * cellW, ay = gy + r * cellH;
+        ctx.fillStyle = 'rgba(255,255,255,0.08)'; this.roundRect(ax, ay, L.iconS, L.iconS, 8); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '600 14px sans-serif';
+        ctx.fillText(this.apps[i].letter, ax + L.iconS / 2, ay + L.iconS / 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '11px sans-serif';
+        ctx.fillText(String(this.apps[i].title).slice(0, 6), ax + L.iconS / 2, ay + L.iconS + 14);
+      }
+      const py = L.y + L.h - L.pad - L.powerH;
+      const cw = (L.w - L.pad * 2) / L.power.length;
+      for (let i = 0; i < L.power.length; i++) {
+        const bx = L.x + L.pad + i * cw;
+        ctx.fillStyle = 'rgba(255,255,255,0.08)'; this.roundRect(bx + 3, py + 4, cw - 6, L.powerH - 8, 6); ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '13px sans-serif';
+        ctx.fillText(L.power[i].label, bx + cw / 2, py + L.powerH / 2);
+      }
+      ctx.textAlign = 'left';
+    }
+  }
+  renderLock() {
+    const ctx = this.ctx, W = this.W(), H = this.H();
+    ctx.fillStyle = 'rgba(0,0,0,0.93)'; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#e0e0e0'; ctx.font = 'bold 22px -apple-system, sans-serif';
+    ctx.fillText(this._loggedOut ? '已退出登录' : '已锁定', W / 2, H / 2 - 20);
+    ctx.fillStyle = '#888'; ctx.font = '14px -apple-system, sans-serif';
+    ctx.fillText(this._loggedOut ? '点击任意处以 guest 重新登录' : '点击任意处解锁', W / 2, H / 2 + 16);
+    ctx.textAlign = 'left';
+  }
+  renderShutdown() {
+    const ctx = this.ctx, W = this.W(), H = this.H();
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#555'; ctx.font = '16px -apple-system, sans-serif';
+    ctx.fillText('已关机', W / 2, H / 2 - 30);
+    const bw = 90, bh = 34, bx = W / 2 - bw / 2, by = H / 2 + 10;
+    ctx.fillStyle = 'rgba(255,255,255,0.12)'; this.roundRect(bx, by, bw, bh, 8); ctx.fill();
+    ctx.fillStyle = '#e0e0e0'; ctx.font = '14px sans-serif';
+    ctx.fillText('⏻ 开机', W / 2, by + bh / 2);
+    ctx.textAlign = 'left';
   }
 
   renderMenuBar(W) {

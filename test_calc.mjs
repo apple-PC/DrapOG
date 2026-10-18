@@ -28,7 +28,7 @@ await tick();
 
 const st = sys.drapWins.get(1);
 assert(!!st, '窗口 1 已创建');
-assert(st.controls.some(c => c.type === 'button' && c.id === 'b7'), '按钮控件已声明（win_button）');
+assert(st.controls.some(c => c.type === 'button' && c.id === '7'), '按钮控件已声明（win_button，id 即显示文字）');
 assert(st.controls.some(c => c.type === 'label' && c.x === 24 && c.y === 54), '显示屏 label 已声明');
 
 function disp() {
@@ -39,25 +39,25 @@ async function tap(id) { sys.injectWinEvent(1, 'click ' + id); await tick(); sys
 async function seq(ids) { for (const id of ids) await tap(id); }
 
 console.log('== 3. 2 + 3 = → 5 ==');
-await seq(['bc', 'b2', 'badd', 'b3', 'beq']);
+await seq(['C', '2', '+', '3', '=']);
 assert(disp() === '5', '2+3=5（当前显示 ' + disp() + '）');
 
 console.log('== 4. 5 * 4 = → 20 ==');
-await seq(['bc', 'b5', 'bmul', 'b4', 'beq']);
+await seq(['C', '5', '*', '4', '=']);
 assert(disp() === '20', '5*4=20（当前显示 ' + disp() + '）');
 
 console.log('== 5. 10 - 3 - 2 = → 5（左结合链式）==');
-await seq(['bc', 'b1', 'b0', 'bsub', 'b3', 'bsub', 'b2', 'beq']);
+await seq(['C', '1', '0', '-', '3', '-', '2', '=']);
 assert(disp() === '5', '10-3-2=5（当前显示 ' + disp() + '）');
 
 console.log('== 6. 8 / 0 = → 0（除零保护，来自 drapp 模块 apply）==');
-await seq(['bc', 'b8', 'bdiv', 'b0', 'beq']);
+await seq(['C', '8', '/', '0', '=']);
 assert(disp() === '0', '8/0=0 不崩溃（当前显示 ' + disp() + '）');
 
 console.log('== 7. 多位输入 + clear ==');
-await seq(['bc', 'b1', 'b2', 'b3']);
-assert(disp() === '123', '连续输入得 123');
-await tap('bc');
+  await seq(['C', '1', '2', '3']);
+  assert(disp() === '123', '连续输入得 123');
+  await tap('C');
 assert(disp() === '0', 'clear 归零');
 
 console.log('== 8. close → VM 停机 ==');

@@ -125,6 +125,11 @@
   - 免 mount 可用 Shell：`_ensureRepl` 在 vfs 读不到 `/System/shell.drapp` 时，改用 `fetch(new URL('System/shell.drapp', import.meta.url))` 从项目服务端取源码——内存模式（未挂载）也能跑 DrapLang Shell，不必先 `mount`。
   - `gui <theme>` 透修：shell.drapp 的 `gui` 分支改走 `term_hostcmd(line)`（原来 `term_gui()` 丢主题参数）→ executeLegacy 解析 `gui windows` → `switchToGUI('windows')`；GUI 内 Terminal 的 `switchToGUI` 改为 `wm.setTheme(theme)` 实时切换（原为 no-op）；CMD 内仍走 `startGUI({theme})`。
   - 新增 test_shellrep.mjs（真跑 REPL：自举不回退、输出 help、`gui windows`→switchToGUI('windows')）；全套 20 个测试文件回归无回归
+- **主菜单 + UI 反馈修复（项目 1.8.2）**：
+  - 计算器按钮标签：`win_button` 的 id 即显示文字，原 id 带 "b" 前缀（b7/badd）导致显示 "b7"；改用符号 id（7 8 9 / 4 5 6 * 1 2 3 - C 0 = +），显示干净。
+  - Windows 控件重叠：方形 min/max/close 边长 26 > 间距 20 相互重叠；间距提到 26、边长降到 22。
+  - 主菜单：macOS 左上角 Apple 菜单（ 关于本机 / 系统设置... / 锁定屏幕 / 重新启动... / 关机...）；Windows 任务栏 Start 开「开始菜单」（应用网格 + 锁定/注销/重启/关机）。Start 不再与 Ap 重复打开 AppMgr。新增锁屏/关机覆盖层与电源动作（restart=location.reload；lock/logout=锁屏；shutdown=关机屏 + 开机键）。菜单/覆盖层逻辑可在 node 下单测（hitMenu / runMenuAction / appleMenuLayout / startMenuLayout）。
+  - 新增 test_theme.mjs 主菜单断言（Apple 菜单逐项、开始菜单电源行/网格、锁/注销/关机）；全套 20 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -802,4 +807,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.8.1
+最后更新：2026-10-18　当前版本：1.8.2
