@@ -105,6 +105,8 @@ export class VM {
     this.halted = false;
     this.out = '';
     this.steps = 0;
+    this.curLine = 0;        // 当前执行指令对应的源码行（运行期错误诊断）
+    this.callStack = [];     // 调用栈（运行期错误诊断）：[{fn, line}]
   }
 
   /* ---------- 堆对象访问（供 DrapSYS 使用） ---------- */
@@ -164,18 +166,40 @@ export class VM {
     if (this.regs[5] < 0) throw new Error('VM: 栈溢出（进入 main）');
     this.write(this.regs[5], -1);
 
+    // 运行期错误诊断：栈底帧 + 行号跟踪
+    this.callStack = [{ fn: 'main', line: 0 }];
+    this.curLine = 0;
+
     while (!this.halted && this.pc < this.instructions.length) {
-      if (++this.steps > this.maxSteps) throw new Error('VM: 步数超限');
+      if (++this.steps > this.maxSteps) throw this._augment(new Error('VM: 步数超限'));
       const ins = this.instructions[this.pc];
+      if (ins.line) this.curLine = ins.line;   // 跟踪当前源码行
       if (ins.op === 'LABEL') { this.pc++; continue; }
 
       if (ins.op === 'SYSCALL') {
-        await this._doSyscall(ins);
+        try { await this._doSyscall(ins); }
+        catch (e) { throw this._augment(e); }
         continue;
       }
 
-      this.execute(ins);
+      try { this.execute(ins); }
+      catch (e) { throw this._augment(e); }
     }
+  }
+
+  // 把运行期错误包装为带「源码行 + 简调用栈」的诊断信息
+  _augment(err) {
+    if (err && err.__diag) return err;   // 已是诊断错误，避免重复包装
+    const msg = (err && err.message) ? err.message : String(err);
+    const line = this.curLine ? (' 行 ' + this.curLine) : '';
+    let stack = '';
+    if (this.callStack && this.callStack.length) {
+      const frames = this.callStack.map((f, i) => '    #' + i + ' ' + f.fn + (f.line ? ' (行 ' + f.line + ')' : ''));
+      stack = '\n调用栈:\n' + frames.join('\n');
+    }
+    const wrapped = new Error(msg + line + stack);
+    wrapped.__diag = true;
+    return wrapped;
   }
 
   async _doSyscall(ins) {
@@ -245,6 +269,7 @@ export class VM {
         this.regs[5]--;
         if (this.regs[5] < 0) throw new Error('VM: 栈溢出（CALL）');
         this.write(this.regs[5], this.pc + 1);
+        this.callStack.push({ fn: args[0], line: this.curLine });   // 运行期诊断：入栈
         this.pc = this._label(args[0]);
         return;
       }
@@ -252,6 +277,7 @@ export class VM {
         const ret = this.read(this.regs[5]);
         this.regs[5]++;
         if (ret === -1) { this.halted = true; return; }
+        if (this.callStack.length > 1) this.callStack.pop();         // 运行期诊断：出栈（保留 main 底帧）
         this.pc = ret;
         return;
       }
@@ -311,6 +337,15 @@ export class VM {
         this.setR(args[0], s.length);
         this.pc++; return;
       }
+      case 'LEN': {
+        // 运行期分发：字符串→长度，数组→元素数（不依赖编译期类型，规避数组元素字符串误判）
+        const o = this.heap[this.getR(args[0])];
+        let len = 0;
+        if (o && o.__type === 'str') len = o.value.length;
+        else if (o && o.__type === 'arr') len = o.items.length;
+        this.setR(args[0], len);
+        this.pc++; return;
+      }
       case 'STREQ': {
         const s1 = this._getStr(this.getR(args[0]));
         const s2 = this._getStr(this.getR(args[1]));
@@ -326,12 +361,14 @@ export class VM {
         this.pc++; return;
       }
       case 'STRSUB': {
-        // STRSUB src, start, dst —— dst = src[start:]，结果写回新堆字符串
+        // STRSUB src, start, len, dst —— dst = src[start:start+len]（len<0 表示到末尾）
         const s = this._getStr(this.getR(args[0]));
         const start = this.opnd(args[1]);
+        const len = this.opnd(args[2]);
+        const end = len >= 0 ? start + len : undefined;
         const ptr = this.heap.length;
-        this.heap.push({ __type: 'str', value: s.slice(start) });
-        this.setR(args[2], ptr);
+        this.heap.push({ __type: 'str', value: s.slice(start, end) });
+        this.setR(args[3], ptr);
         this.pc++; return;
       }
       case 'STRSPLIT': {

@@ -1,0 +1,202 @@
+// DocEdit —— DrapLang 文档编辑器（办公级第一块拼图，L6 自举示范）
+// 多行文本编辑：方向键 / Home / End / 退格 / 回车、滚动、点击定位光标、
+// 打开 / 保存任意路径、字数 / 行列统计、未保存标记。
+// 模型：main 初始化共享状态；on_paint 自绘；on_key / on_click 处理输入。
+entry fn main() -> i32 {
+    let win = syscall win_create("DocEdit 文档编辑器", 720, 520)
+    syscall win_mono(1)
+    syscall win_set_font(15)
+    let lines = [""]
+    let row = 0
+    let col = 0
+    let scroll = 0
+    let dirty = 0
+    let path = "/Users/guest/Documents/未命名.txt"
+    syscall win_set_input("path", path)
+    // 跨事件复用的临时变量（单线程事件循环，安全）
+    let i = 0
+    let n = 0
+    let total = 0
+    let left = ""
+    let right = ""
+    let k = ""
+    let id = ""
+    let x = 0
+    let y = 0
+    let line = ""
+    let ln = 0
+    let vis = 0
+    let cy = 0
+    let cx = 0
+    let content = ""
+    let c = ""
+    let eff = ""
+    let nl = []
+    let mark = ""
+}
+
+event fn on_paint() {
+    let w = syscall win_w()
+    let h = syscall win_h()
+    // 编辑器背景
+    syscall win_set_color(24, 26, 32)
+    syscall win_fill_rect(0, 0, w, h)
+    // 工具栏
+    syscall win_set_color(32, 34, 42)
+    syscall win_fill_rect(0, 0, w, 30)
+    syscall win_button("打开", 8, 4, 56, 22)
+    syscall win_button("保存", 72, 4, 56, 22)
+    syscall win_input("path", 140, 4, w - 148, 22)
+    // 文本区（等宽 15px，行高 20，起始 y=36）
+    vis = (h - 58) / 20
+    i = scroll
+    while (i < scroll + vis) {
+        if (i < len(lines)) {
+            syscall win_set_color(228, 228, 232)
+            syscall win_text(4, 36 + (i - scroll) * 20, lines[i])
+        }
+        i = i + 1
+    }
+    // 光标（2px 竖线）
+    if (row >= scroll && row < scroll + vis) {
+        cx = 4 + col * 9
+        cy = 36 + (row - scroll) * 20
+        syscall win_set_color(10, 132, 255)
+        syscall win_fill_rect(cx, cy, 2, 20)
+    }
+    // 状态栏
+    syscall win_set_color(32, 34, 42)
+    syscall win_fill_rect(0, h - 22, w, 22)
+    total = 0
+    i = 0
+    while (i < len(lines)) { total = total + len(lines[i]); i = i + 1 }
+    total = total + (len(lines) - 1)
+    eff = syscall win_input_get("path")
+    if (eff == "") { eff = path }
+    mark = ""
+    if (dirty == 1) { mark = "  *未保存" }
+    syscall win_set_color(180, 184, 196)
+    syscall win_text(8, h - 18, "行 " + itoa(row + 1) + "/" + itoa(len(lines)) + "  列 " + itoa(col) + "  字符 " + itoa(total) + "  " + eff + mark)
+}
+
+event fn on_key(ev: str) {
+    if (ev == "key ") { k = " " }
+    else { k = substr(ev, 4) }
+    if (k == "Backspace") {
+        if (col > 0) {
+            line = lines[row]
+            left = substr(line, 0, col - 1)
+            right = substr(line, col)
+            lines[row] = left + right
+            col = col - 1
+            dirty = 1
+        } else if (row > 0) {
+            left = lines[row - 1]
+            line = lines[row]
+            lines[row - 1] = left + line
+            nl = []
+            i = 0
+            while (i < len(lines)) {
+                if (i != row) { nl.push(lines[i]) }
+                i = i + 1
+            }
+            lines = nl
+            row = row - 1
+            col = len(left)
+            dirty = 1
+        }
+    } else if (k == "Enter") {
+        line = lines[row]
+        left = substr(line, 0, col)
+        right = substr(line, col)
+        lines[row] = left
+        nl = []
+        i = 0
+        while (i < len(lines)) {
+            if (i == row) { nl.push(left); nl.push(right) }
+            else { nl.push(lines[i]) }
+            i = i + 1
+        }
+        lines = nl
+        row = row + 1
+        col = 0
+        dirty = 1
+    } else if (k == "ArrowLeft") {
+        if (col > 0) { col = col - 1 }
+        else if (row > 0) { row = row - 1; col = len(lines[row]) }
+    } else if (k == "ArrowRight") {
+        ln = len(lines[row])
+        if (col < ln) { col = col + 1 }
+        else if (row < len(lines) - 1) { row = row + 1; col = 0 }
+    } else if (k == "ArrowUp") {
+        if (row > 0) { row = row - 1; if (col > len(lines[row])) { col = len(lines[row]) } }
+    } else if (k == "ArrowDown") {
+        if (row < len(lines) - 1) { row = row + 1; if (col > len(lines[row])) { col = len(lines[row]) } }
+    } else if (k == "Home") {
+        col = 0
+    } else if (k == "End") {
+        col = len(lines[row])
+    } else if (len(k) == 1) {
+        line = lines[row]
+        lines[row] = substr(line, 0, col) + k + substr(line, col)
+        col = col + 1
+        dirty = 1
+    }
+    // 滚动跟随光标
+    vis = (syscall win_h() - 58) / 20
+    if (row < scroll) { scroll = row }
+    if (row >= scroll + vis) { scroll = row - vis + 1 }
+    if (scroll < 0) { scroll = 0 }
+    syscall win_invalidate(win)
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    if (id == "打开") {
+        eff = syscall win_input_get("path")
+        if (eff == "") { eff = path }
+        n = syscall fs_exists(eff)
+        if (n == 1) {
+            c = syscall fs_read(eff)
+            lines = split(c, "\n")
+            path = eff
+            row = 0
+            col = 0
+            scroll = 0
+            dirty = 0
+        }
+        syscall win_invalidate(win)
+    } else if (id == "保存") {
+        eff = syscall win_input_get("path")
+        if (eff == "") { eff = path }
+        content = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { content = lines[i] }
+            else { content = content + "\n" + lines[i] }
+            i = i + 1
+        }
+        syscall fs_write(eff, content)
+        path = eff
+        dirty = 0
+        syscall win_invalidate(win)
+    } else {
+        // 文本区点击定位光标
+        x = atoi(split(ev, " ")[1])
+        y = atoi(split(ev, " ")[2])
+        if (y >= 36 && y < syscall win_h() - 22) {
+            row = scroll + (y - 36) / 20
+            if (row < 0) { row = 0 }
+            if (row >= len(lines)) { row = len(lines) - 1 }
+            ln = len(lines[row])
+            col = (x - 4) / 9
+            if (col < 0) { col = 0 }
+            if (col > ln) { col = ln }
+            syscall win_invalidate(win)
+        }
+    }
+}
+
+event fn on_close() {
+    return 0
+}

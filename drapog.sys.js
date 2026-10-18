@@ -71,12 +71,14 @@ export class DrapSYS {
       0x49: this.win_invalidate.bind(this),
       0x4a: this.win_atoi.bind(this),
       0x4c: this.itoa.bind(this),
+      0x50: this.win_mono.bind(this),
       0x4d: this.win_w.bind(this),
       0x4e: this.win_h.bind(this),
       0x4f: this.win_button.bind(this),
       0x51: this.win_label.bind(this),
       0x52: this.win_input_get.bind(this),
       0x53: this.win_input.bind(this),
+      0x70: this.win_set_input.bind(this),
       0x60: this.args_count.bind(this),
       0x61: this.args_get.bind(this),
     };
@@ -299,7 +301,7 @@ export class DrapSYS {
       drawOps: [],
       controls: [],        // 声明式控件：每帧 paint 时重置，由 drapp 填充
       inputs: new Map(),   // 输入框持久值：id -> string（跨帧保留用户输入）
-      style: { color: [255, 255, 255], font: 14 },
+      style: { color: [255, 255, 255], font: 14, mono: false },
       title, w, h,
       dirty: true,
     });
@@ -330,7 +332,7 @@ export class DrapSYS {
   win_text(x, y, strPtr) {
     const st = this._cur();
     if (!st) return 0;
-    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font });
+    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono });
     return 0;
   }
 
@@ -359,6 +361,22 @@ export class DrapSYS {
     const st = this._cur();
     if (!st) return 0;
     st.style.font = size;
+    return 0;
+  }
+
+  // 切换等宽字体（编辑器光标精确定位）：on 非 0 → 等宽
+  win_mono(on) {
+    const st = this._cur();
+    if (!st) return 0;
+    st.style.mono = (on != 0);
+    return 0;
+  }
+
+  // 预设输入框内容（drapp 主动写，如预填文件路径）
+  win_set_input(idPtr, valPtr) {
+    const st = this._cur();
+    if (!st) return 0;
+    st.inputs.set(this.vm.readStr(idPtr), this.vm.readStr(valPtr));
     return 0;
   }
 

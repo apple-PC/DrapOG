@@ -44,6 +44,7 @@ const SYS_TABLE = {
   'win_invalidate': 0x49,
   'win_atoi':       0x4a,
   'itoa':           0x4c,
+  'win_mono':       0x50,   // 切换等宽字体（编辑器光标精确定位用）：win_mono(1) 开 / win_mono(0) 关
   // GUI 控件框架（win_gui）：声明式按钮 / 标签 / 输入框，宿主自动布局与命中
   'win_w':          0x4d,
   'win_h':          0x4e,
@@ -51,6 +52,7 @@ const SYS_TABLE = {
   'win_label':      0x51,
   'win_input_get':  0x52,
   'win_input':      0x53,
+  'win_set_input':  0x70,   // 预设输入框内容（drapp 主动写，如预填文件路径）
   // 进程参数（CLI 工具读取命令行）
   'args_count': 0x60,
   'args_get':   0x61,
@@ -142,12 +144,14 @@ const SYS_RET = {
   'win_invalidate': { kind: 'prim', name: 'i32' },
   'win_atoi':       { kind: 'prim', name: 'i32' },
   'itoa':           { kind: 'prim', name: 'str' },
+  'win_mono':       { kind: 'prim', name: 'i32' },
   'win_w':          { kind: 'prim', name: 'i32' },
   'win_h':          { kind: 'prim', name: 'i32' },
   'win_button':     { kind: 'prim', name: 'i32' },
   'win_label':      { kind: 'prim', name: 'i32' },
   'win_input_get':  { kind: 'prim', name: 'str' },
   'win_input':      { kind: 'prim', name: 'i32' },
+  'win_set_input':  { kind: 'prim', name: 'i32' },
   'args_count': { kind: 'prim', name: 'i32' },
   'args_get':    { kind: 'prim', name: 'str' },
 };
@@ -189,12 +193,14 @@ const SYS_ARGS = {
   'win_invalidate': 1,
   'win_atoi':       1,
   'itoa':           1,
+  'win_mono':       1,
   'win_w':          0,
   'win_h':          0,
   'win_button':     5,
   'win_label':      3,
   'win_input_get':  1,
   'win_input':      5,
+  'win_set_input':  2,
   'args_count': 0,
   'args_get':   1,
 };
@@ -243,6 +249,8 @@ export class DrapCC {
     this.loopStack = [];
     this.imports = new Set(['core']);
     this.fileImports = [];
+    this.curLine = 0;        // 当前代码生成对应的源码行（用于运行期错误诊断）
+    this._stmtLine = 0;      // 当前语句起始行（解析阶段填充到节点 .line）
   }
 
   compile() {
@@ -452,9 +460,20 @@ export class DrapCC {
   parseFn() {
     const isEntry = this.accept('entry');
     this.expect('fn');
+    // 方法：fn (recv: Type) name(...) —— 接收者编译为首个参数
+    let receiver = null;
+    if (this.is('(')) {
+      this.next();
+      const rname = this.next().value;
+      this.expect(':');
+      const rtype = this.parseType();
+      this.expect(')');
+      receiver = { name: rname, type: rtype };
+    }
     const name = this.next().value;
     this.expect('(');
     const params = [];
+    if (receiver) params.push(receiver);
     if (!this.is(')')) {
       while (true) {
         const pname = this.next().value;
@@ -499,24 +518,33 @@ export class DrapCC {
   }
 
   parseType() {
-    const t = this.next();
-    if (t.type !== 'IDENT') throw this._err('期望类型名，实际 "' + t.value + '"');
-    if (this.accept('[')) {
+    if (this.is('[')) {                       // 数组类型（前缀）：[i32] / [str] / [Point]
+      this.next();
       const elem = this.parseType();
       this.expect(']');
       return { kind: 'array', elem };
+    }
+    const t = this.next();
+    if (t.type !== 'IDENT') throw this._err('期望类型名，实际 "' + t.value + '"');
+    if (this.accept('[')) {                    // 数组类型（后缀）：i32[]
+      this.expect(']');
+      return { kind: 'array', elem: { kind: 'prim', name: t.value } };
     }
     return { kind: 'prim', name: t.value };
   }
 
   parseBlockBody() {
     const body = [];
-    while (!this.is('}') && this.peek().type !== 'EOF') body.push(this.parseStmt());
+    while (!this.is('}') && this.peek().type !== 'EOF') {
+      const s = this.parseStmt();
+      if (s) { s.line = this._stmtLine; body.push(s); }
+    }
     return body;
   }
 
   parseStmt() {
     const t = this.peek();
+    this._stmtLine = t ? t.line : 0;   // 语句级起始行，供运行期错误定位
 
     if (this.is('{')) {
       this.next();
@@ -796,7 +824,7 @@ export class DrapCC {
   }
 
   /* ==================== 代码生成 ==================== */
-  emit(op, args) { this.instructions.push({ op, args: args || [] }); }
+  emit(op, args) { this.instructions.push({ op, args: args || [], line: this.curLine || 0 }); }
   newLabel(p) { return '._' + p + '_' + (this.labelId++); }
   getStringId(s) {
     if (this.stringMap.has(s)) return this.stringMap.get(s);
@@ -928,6 +956,7 @@ export class DrapCC {
   }
 
   genStmt(s) {
+    if (s && s.line) this.curLine = s.line;   // 运行期错误定位到语句行
     switch (s.kind) {
       case 'let': return this.genLet(s);
       case 'assign': return this.genAssign(s);
@@ -988,7 +1017,7 @@ export class DrapCC {
       this.emit('POP', ['r0']);                   // r0 = 右值
       const objType = this.inferType(tgt.obj);
       let fieldIdx = -1;
-      if (objType && objType.kind === 'struct') {
+      if (this.isStructType(objType)) {
         const sd = this.structs.get(objType.name);
         if (sd) fieldIdx = sd.fields.findIndex(f => f.name === tgt.name);
       }
@@ -1253,10 +1282,8 @@ export class DrapCC {
 
   genCall(node) {
     if (node.name === 'len') {
-      const t = this.inferType(node.args[0]);
       this.genExpr(node.args[0]);
-      if (this.isStrType(t)) this.emit('STRLEN', ['r0']);
-      else this.emit('ARRLEN', ['r0']);
+      this.emit('LEN', ['r0']);   // 运行期按堆类型分发（字符串/数组）
       return;
     }
     if (node.name === 'split') {
@@ -1280,15 +1307,24 @@ export class DrapCC {
       return;
     }
     if (node.name === 'substr') {
-      // substr(src, start) → STRSUB src, start, dst；dst 存新字符串指针，搬到 r0
-      if (node.args.length !== 2) throw new Error('substr 需要 2 个参数');
-      this.genExpr(node.args[0]);
-      this.emit('PUSH', ['r0']);
-      this.genExpr(node.args[1]);
-      this.emit('MOV', ['r1', 'r0']);
-      this.emit('POP', ['r0']);
-      this.emit('STRSUB', ['r0', 'r1', 'r2']);
-      this.emit('MOV', ['r0', 'r2']);
+      // substr(src, start) → 从 start 到末尾；substr(src, start, len) → 取 len 字符
+      // 编译为 STRSUB src, start, len, dst（len<0 表示到末尾）
+      if (node.args.length !== 2 && node.args.length !== 3) throw new Error('substr 需要 2 或 3 个参数');
+      this.genExpr(node.args[0]);          // src → r0
+      this.emit('PUSH', ['r0']);           // 保护 src（压栈，远离后续 genExpr 的寄存器scratch）
+      this.genExpr(node.args[1]);          // start → r0
+      this.emit('MOV', ['r1', 'r0']);      // r1 = start
+      this.emit('PUSH', ['r1']);           // 保护 start：求 args[2] 的表达式可能用 r1 作临时寄存器而覆盖它
+      if (node.args.length === 3) {
+        this.genExpr(node.args[2]);        // len → r0（内部可能改动 r1，但 start 已压栈保存）
+        this.emit('MOV', ['r2', 'r0']);
+      } else {
+        this.emit('LI', ['r2', '-1']);
+      }
+      this.emit('POP', ['r1']);            // 还原 start
+      this.emit('POP', ['r0']);            // 还原 src
+      this.emit('STRSUB', ['r0', 'r1', 'r2', 'r3']);
+      this.emit('MOV', ['r0', 'r3']);
       return;
     }
     const bi = BUILTINS[node.name];
@@ -1318,6 +1354,15 @@ export class DrapCC {
   }
 
   genMethodCall(node) {
+    // 结构体方法：obj.m(args) → m(obj, args)（方法是首参为接收者的普通函数）
+    const fn = this.funcs.get(node.method);
+    if (fn) {
+      const all = [node.obj, ...node.args];
+      for (let i = all.length - 1; i >= 0; i--) { this.genExpr(all[i]); this.emit('PUSH', ['r0']); }
+      this.emit('CALL', [node.method]);
+      this.emit('ADDSP', [String(all.length)]);
+      return;
+    }
     if (node.method === 'push') {
       if (node.args.length !== 1) throw new Error('push 需要 1 个参数');
       this.genExpr(node.obj);
@@ -1356,16 +1401,14 @@ export class DrapCC {
 
   genMember(node) {
     if (node.name === 'len') {
-      const t = this.inferType(node.obj);
       this.genExpr(node.obj);
-      if (this.isStrType(t)) this.emit('STRLEN', ['r0']);
-      else this.emit('ARRLEN', ['r0']);
+      this.emit('LEN', ['r0']);   // 运行期分发（字符串/数组）
       return;
     }
     this.genExpr(node.obj);
     const objType = this.inferType(node.obj);
     let fieldIdx = -1;
-    if (objType && objType.kind === 'struct') {
+    if (this.isStructType(objType)) {
       const sd = this.structs.get(objType.name);
       if (sd) fieldIdx = sd.fields.findIndex(f => f.name === node.name);
     }
@@ -1388,18 +1431,24 @@ export class DrapCC {
     const sd = this.structs.get(node.name);
     if (!sd) throw new Error('未定义结构体: ' + node.name);
     this.emit('NEWOBJ', [String(sd.fields.length), 'r0']);
-    this.emit('MOV', ['r7', 'r0']);
+    this.emit('PUSH', ['r0']);                 // 结构体指针压栈（防被字段值的 genExpr 冲掉，如数组/嵌套 struct 也用 r7）
     for (const f of node.fields) {
       const idx = sd.fields.findIndex(sf => sf.name === f.name);
       if (idx < 0) throw new Error('未知字段: ' + f.name);
-      this.genExpr(f.value);
-      this.emit('FLDSET', ['r7', String(idx), 'r0']);
+      this.genExpr(f.value);                    // r0 = 字段值
+      this.emit('PUSH', ['r0']);                // 暂存字段值
+      this.emit('POP', ['r1']);                 // r1 = 字段值
+      this.emit('POP', ['r7']);                 // r7 = 结构体指针
+      this.emit('FLDSET', ['r7', String(idx), 'r1']);
+      this.emit('PUSH', ['r7']);                // 结构体指针再压栈，供下一字段
     }
-    this.emit('MOV', ['r0', 'r7']);
+    this.emit('POP', ['r0']);                   // r0 = 结构体指针
   }
 
   /* ==================== 类型推断 ==================== */
   isStrType(t) { return t && t.kind === 'prim' && t.name === 'str'; }
+  // 结构体类型：显式 struct，或被 parseType 包成 prim 但名字是已声明 struct（参数/字段类型）
+  isStructType(t) { return !!t && (t.kind === 'struct' || (t.kind === 'prim' && this.structs.has(t.name))); }
 
   inferType(node) {
     if (!node) return { kind: 'prim', name: 'i32' };
@@ -1435,7 +1484,7 @@ export class DrapCC {
       case 'member': {
         if (node.name === 'len') return { kind: 'prim', name: 'i32' };
         const objT = this.inferType(node.obj);
-        if (objT.kind === 'struct') {
+        if (this.isStructType(objT)) {
           const sd = this.structs.get(objT.name);
           if (sd) {
             const f = sd.fields.find(f => f.name === node.name);
@@ -1451,7 +1500,10 @@ export class DrapCC {
         return { kind: 'prim', name: 'i32' };
       }
       case 'neg': case 'not': return { kind: 'prim', name: 'i32' };
-      case 'methodcall': return { kind: 'prim', name: 'void' };
+      case 'methodcall': {
+        const fn = this.funcs.get(node.method);
+        return fn ? fn.retType : { kind: 'prim', name: 'i32' };
+      }
     }
     return { kind: 'prim', name: 'i32' };
   }

@@ -81,7 +81,7 @@
 - Shell 用 **DrapLang 重写**（自举第一步）：System/shell.drap 是第一个用 DrapLang 写的系统组件，REPL 全程只通过 syscall 调用底层工具；宿主命令（mount/cc/load/save/asm/dis/dump/run…）经 term_hostcmd 委托回 JS 版 executeLegacy；shell.drap 缺失时自动回退 JS 版
 - DrapLang 编译器：函数、字符串、数组、结构体、syscall
 - DrapLang 字符串支持：索引 s[i]（码点）/ 切片 substr / 切分 split（编译器语法糖 + VM 指令 STRGET/STRSUB/STRSPLIT）
-- DrapVM：48 条指令（含 SYSCALL / ADDSP / STRGET / STRSUB / STRSPLIT）
+- DrapVM：49 条指令（含 SYSCALL / ADDSP / STRGET / STRSUB / STRSPLIT / LEN）
 - DBYTE 格式（pack/unpack/hexdump，版本 0x0102）
 - DrapAS 汇编器（.dasm → .dbyte）
 - DrapDis 反汇编器（.dbyte → .dasm）
@@ -138,6 +138,7 @@
   - **TextEdit**：新增可编辑路径栏（改路径→打开/保存 = 打开/另存为）。
   - **废纸篓/回收站 + 此电脑**：新增 Trash 应用（还原/清空）与此电脑应用（卷列表，双击 openFinderAt）；删除=移入 `/Library/Trash`（递归、重名加序号、可还原/清空）。接入 dock/任务栏/AppMgr。
   - 新增 test_trash.mjs（14 断言）+ test_theme.mjs 增右键菜单/主题合并断言（47 项）；全套 21 个测试文件回归无回归
+- **L6 办公级第一块拼图：DrapLang 文档编辑器 DocEdit（项目 2.0.0）**：用 DrapLang 编写的多行文本编辑器 `System/Apps/DocEdit.app`（type:gui）——方向键/Home/End/退格/回车、滚动、点击定位光标、打开/保存任意路径、字数/行列统计、未保存标记；演示 `win_mono` 等宽字体（光标精确定位）+ `win_set_input` 输入框预填（默认路径）+ 运行期错误诊断（行号+调用栈，A 阶段地基）。已接入 dock（Do 图标）+ AppMgr + registry（`addDrap('docedit', ...)` 配 `Info.json`）。修复两个 bug：（1）**substr 代码生成的寄存器分配缺陷**——`start` 存于 r1，求值 `len` 表达式（如 `col-1`）时内部用 r1 作临时寄存器把它覆盖，导致 `substr(s,0,n)` 的 start 被篡改为 1，退格删末尾字符错误（'World'→'orld'）；现求值 `args[2]` 前先把 `start`/`src` 压栈保护、再出栈还原；（2）**DBYTE packer 漏掉 `LEN` 指令**——`len()` 运行期编译为 `LEN`，但 `drapog.dbyte.js` 的 OPCODE/ARG_SPEC 无 LEN，预编译/往返含 `len()` 的程序会报「未知指令」，已补 `LEN:49`（单寄存器操作数）。新增 test_docedit.mjs（10 项无头冒烟全绿）；全套 24 个测试文件回归无回归
 
 未完成：
 - 窗口管理器用 DrapLang 重写
@@ -268,18 +269,20 @@ DrapLang 源码 (.drap)
 - 下标：arr[i]
 - 内置函数：len(x)
 
-### 当前 VM 支持的指令（48 条）
+### 当前 VM 支持的指令（49 条）
 
 LABEL LI MOV ADD SUB MUL DIV MOD
 LT LE GT GE EQ NE
 JMP JZ JNZ PUSH POP
 CALL RET ENTER LEAVE ALLOC
 LOADL STOREL
-STR STRCAT STRLEN STREQ STRGET STRSUB STRSPLIT PRINTSTR
+STR STRCAT STRLEN STREQ STRGET STRSUB STRSPLIT LEN PRINTSTR
 PRINT PRINTINT PRINTLN
 NEWARR ARRGET ARRSET ARRLEN ARRPUSH
 NEWOBJ FLDGET FLDSET
 ADDSP HLT SYSCALL
+
+LEN 为运行期长度分发：操作数 r0 是堆对象指针，按 `__type` 决定取字符串字符数或数组元素数（规避「字符串元素的数组」在编译期被误判为数组而走 ARRLEN 的 bug）。DBYTE 编码号 49。
 
 ### 堆对象类型
 
@@ -815,4 +818,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：1.9.0
+最后更新：2026-10-18　当前版本：2.0.0

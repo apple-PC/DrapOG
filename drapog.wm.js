@@ -45,10 +45,10 @@ export class WindowManager {
     // dock 应用（图标统一为 id 前两字母；guidemo/paint 演示应用已移除）
     const TITLES = {
       finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
-      conv: 'Conv', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
+      conv: 'Conv', docedit: 'DocEdit', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
       trash: '废纸篓', thispc: '此电脑',
     };
-    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc']
+    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'docedit', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc']
       .map(id => ({ id, letter: appIcon(id), title: TITLES[id] }));
 
     this._appImpls = new Map();   // appId -> 实现

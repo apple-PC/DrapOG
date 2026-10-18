@@ -1,0 +1,12 @@
+{
+  "id": "docedit",
+  "name": "DocEdit 文档",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "icon": "📝",
+  "author": "DrapOG",
+  "description": "DrapLang 文档编辑器：多行文本编辑、方向键/Home/End/退格/回车、滚动、点击定位光标、打开/保存任意路径、字数/行列统计、未保存标记",
+  "category": "productivity",
+  "modules": []
+}

@@ -84,6 +84,11 @@ export async function startGUI(opts = {}) {
     registry.addDrap('conv',     { name: 'Conv 进制转换', icon: '🔟', type: 'gui',
       file: '../Apps/Conv.app/main.drapp', baseUrl: import.meta.url, modules: ['baseconv'],
       version: '1.0', author: 'DrapOG', description: '十进制转二/八/十六进制（win_gui + import baseconv）', category: 'utilities' });
+    // L6：DrapLang 文档编辑器（办公级第一块拼图；多行文本编辑 + 打开/保存任意路径）
+    //     用 DrapLang 自举的「真编辑器」，作为所有 drapp 的范例；也演示 win_mono 等宽字体 + 输入框预填。
+    registry.addDrap('docedit',  { name: 'DocEdit 文档', icon: '📝', type: 'gui',
+      file: '../Apps/DocEdit.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: 'DrapLang 文档编辑器（多行编辑/打开/保存）', category: 'productivity' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 

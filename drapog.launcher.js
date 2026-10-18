@@ -35,7 +35,9 @@ export const drapAppBridge = {
     for (const op of st.drawOps) {
       if (op.op === 'text') {
         ctx.fillStyle = _rgb(op.color);
-        ctx.font = op.font + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        ctx.font = op.font + 'px ' + (op.mono
+          ? 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+          : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillText(op.text, op.x, op.y);

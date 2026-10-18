@@ -31,6 +31,7 @@ export const OPCODE = {
   STRSUB: 46,
   STRSPLIT: 47,
   BUILTIN: 48,
+  LEN: 49,
 };
 
 export const OPNAME = {};
@@ -86,6 +87,7 @@ export const ARG_SPEC = {
   STRSUB: ['r', 'r', 'r'],
   STRSPLIT: ['r', 'r', 'r'],
   BUILTIN: ['i'],
+  LEN: ['r'],
 };
 
 export function pack(program) {
