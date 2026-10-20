@@ -1,0 +1,35 @@
+// stdlib —— DrapLang 标准库（共享模块；由 tools/mkapp.mjs 复制到每个 .app 目录）
+// 约定：共享模块只含纯函数（无 syscall / 无 event），应用用 `import "stdlib"` 复用。
+// 模块文件名即 import 名（不带扩展名）；模块内只能有 fn / struct / import 声明。
+
+// 把 v 限制在 [lo, hi] 区间内
+fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
+    if (v < lo) { return lo }
+    if (v > hi) { return hi }
+    return v
+}
+
+// 两数较大者
+fn max2(a: i32, b: i32) -> i32 {
+    if (a > b) { return a }
+    return b
+}
+
+// 两数较小者
+fn min2(a: i32, b: i32) -> i32 {
+    if (a < b) { return a }
+    return b
+}
+
+// 符号：正返回 1，负返回 -1，零返回 0
+fn sign(v: i32) -> i32 {
+    if (v > 0) { return 1 }
+    if (v < 0) { return -1 }
+    return 0
+}
+
+// 取绝对值
+fn abs(v: i32) -> i32 {
+    if (v < 0) { return 0 - v }
+    return v
+}

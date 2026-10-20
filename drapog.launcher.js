@@ -132,6 +132,10 @@ export function launchDrapAppProgram(wm, vfs, program) {
       return win.id;
     },
     onWinClose: (winId) => { wm.closeWindow(winId); },
+    getTheme: () => (wm && wm.T && wm.T.palette) ? wm.T.palette : null,
+    onSetTheme: (name) => { if (wm && typeof wm.setTheme === 'function') wm.setTheme(name); },
+    onOpenFinder: (path) => { if (wm && typeof wm.openFinderAt === 'function') wm.openFinderAt(path); },
+    onSetSoftKeyboard: (on) => { if (wm) wm.softKeyboard.open = !!on; },
   });
   vm.sys = sys;
   // 跑 VM：内部事件循环会在 win_get_event 处阻塞，由真实事件唤醒

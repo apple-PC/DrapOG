@@ -1,0 +1,34 @@
+// __APPNAME__ —— DrapLang 应用（由 tools/mkapp.mjs 生成）
+// 事件驱动模型：main 初始化共享状态；on_paint 自绘；on_click 处理输入；on_close 关闭。
+// 用 win_theme(slot) 读取主题语义色（0=背景 1=前景 2=强调 3=工具栏 4=选中）以自动适配
+// macOS / Windows 双主题；新增按钮用 win_button(id, x, y, w, h)（id 同时是显示文字与事件 id）。
+__IMPORT_STDLIB__
+entry fn main() -> i32 {
+    let win = syscall win_create("__WINTITLE__", 420, 300)
+    let W = 0
+    let H = 0
+    let msg = "__HELLO__"
+    let id = ""
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    syscall win_theme(1)
+    syscall win_set_font(15)
+    syscall win_text(20, 24, msg)
+    syscall win_button("__BTNLABEL__", 20, 60, 90, 32)
+    return 0
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    if (id == "__BTNLABEL__") { msg = "你点击了 __BTNLABEL__"; syscall win_invalidate(win); return 0 }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

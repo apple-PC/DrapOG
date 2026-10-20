@@ -1,0 +1,10 @@
+{
+  "id": "thispc",
+  "name": "此电脑",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "此电脑（DrapLang 自举版：卷与目录，打开 Finder）",
+  "category": "system"
+}

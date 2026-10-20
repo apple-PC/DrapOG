@@ -1,0 +1,105 @@
+// Trash —— 废纸篓（DrapLang 自举版，L7·D 阶段示范）
+// 列出 /Library/Trash，支持「还原」（移回 /Users/guest）与「清空」；单击条目选中。
+// 模型：main 初始化共享状态；on_paint 自绘列表与工具栏；on_click 处理按钮与选中。
+entry fn main() -> i32 {
+    let win = syscall win_create("废纸篓", 460, 340)
+    let W = 0
+    let H = 0
+    let list = [""]
+    let sel = -1
+    let status = ""
+    let i = 0
+    let n = 0
+    let empty = 1
+    let name = ""
+    let x = 0
+    let y = 0
+    let id = ""
+    let ry = 0
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    // 背景
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    // 工具栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 0, W, 36)
+    syscall win_button("还原", 8, 4, 64, 28)
+    syscall win_button("清空", 80, 4, 64, 28)
+    // 列表
+    list = split(syscall fs_ls("/Library/Trash"), "\n")
+    n = len(list)
+    empty = 1
+    i = 0
+    while (i < n) {
+        name = list[i]
+        if (len(name) > 0) {
+            empty = 0
+            ry = 44 + i * 28
+            if (i == sel) { syscall win_theme(4); syscall win_fill_rect(0, ry, W, 28) }
+            syscall win_theme(2)
+            syscall win_fill_rect(14, ry + 7, 14, 14)
+            syscall win_theme(1)
+            syscall win_set_font(15)
+            syscall win_text(38, ry + 4, name)
+        }
+        i = i + 1
+    }
+    if (empty == 1) {
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        syscall win_text(16, 48, "废纸篓为空")
+    }
+    if (len(status) > 0) {
+        syscall win_theme(1)
+        syscall win_set_font(11)
+        syscall win_text(8, H - 16, status)
+    }
+    return 0
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    if (id == "还原") {
+        if (sel >= 0) {
+            list = split(syscall fs_ls("/Library/Trash"), "\n")
+            name = list[sel]
+            if (len(name) > 0) {
+                syscall fs_move("/Library/Trash/" + name, "/Users/guest/" + name)
+                status = "已还原 " + name
+            } else { status = "请先选中一项" }
+        } else { status = "请先选中一项" }
+        syscall win_invalidate(win)
+        return 0
+    }
+    if (id == "清空") {
+        list = split(syscall fs_ls("/Library/Trash"), "\n")
+        i = 0
+        while (i < len(list)) {
+            name = list[i]
+            if (len(name) > 0) { syscall fs_rm("/Library/Trash/" + name) }
+            i = i + 1
+        }
+        sel = -1
+        status = "已清空"
+        syscall win_invalidate(win)
+        return 0
+    }
+    // 列表点击选中
+    x = atoi(split(ev, " ")[1])
+    y = atoi(split(ev, " ")[2])
+    if (y >= 44) {
+        sel = (y - 44) / 28
+        list = split(syscall fs_ls("/Library/Trash"), "\n")
+        if (sel >= 0 && sel < len(list) && len(list[sel]) == 0) { sel = -1 }
+        syscall win_invalidate(win)
+    }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

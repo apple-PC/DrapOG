@@ -10,8 +10,7 @@ import { VFS } from '../../drapog.vfs.js';
 import { DrapShell } from '../../drapog.shell.js';
 import {
   createFinderApp, createTerminalApp, createAppManagerApp,
-  createEditApp, createSettingsApp, createAboutApp,
-  createTrashApp, createThisPCApp,
+  createEditApp, createAboutApp,
 } from '../../drapog.apps.js';
 import { DrapSYS } from '../../drapog.sys.js';
 import { drapAppBridge } from '../../drapog.launcher.js';
@@ -66,11 +65,8 @@ export async function startGUI(opts = {}) {
     registry.addHost('finder',   { name: 'Finder',       icon: '📁', title: 'Finder' });
     registry.addHost('terminal', { name: 'Terminal',     icon: '>',  title: 'Terminal' });
     registry.addHost('edit',     { name: 'TextEdit',     icon: 'T',  title: 'TextEdit' });
-    registry.addHost('settings', { name: '设置',         icon: '⚙',  title: '设置' });
     registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
     registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
-    registry.addHost('trash',    { name: '废纸篓',       title: '废纸篓' });
-    registry.addHost('thispc',   { name: '此电脑',       title: '此电脑' });
     // DrapLang 应用（内存模式用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 scan 覆盖）
     // 演示/调色板类应用（GuiDemo/Paint）已移除，只保留实用应用。
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
@@ -89,6 +85,16 @@ export async function startGUI(opts = {}) {
     registry.addDrap('docedit',  { name: 'DocEdit 文档', icon: '📝', type: 'gui',
       file: '../Apps/DocEdit.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang 文档编辑器（多行编辑/打开/保存）', category: 'productivity' });
+    // L7·D：把设置 / 废纸篓 / 此电脑从 JS 宿主应用改写为 DrapLang 自举应用
+    registry.addDrap('settings', { name: '设置',         icon: '⚙',  type: 'gui',
+      file: '../Apps/Settings.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '系统设置（主题切换 / 软键盘）', category: 'system' });
+    registry.addDrap('trash',    { name: '废纸篓',       icon: '🗑',  type: 'gui',
+      file: '../Apps/Trash.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '废纸篓（还原 / 清空）', category: 'system' });
+    registry.addDrap('thispc',   { name: '此电脑',       icon: '💻',  type: 'gui',
+      file: '../Apps/ThisPC.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '此电脑（卷与目录 / 打开 Finder）', category: 'system' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
@@ -96,10 +102,7 @@ export async function startGUI(opts = {}) {
     wm.registerApp('terminal', createTerminalApp({ vfs, DrapShell, registry }));
     wm.registerApp('__drapapp__', drapAppBridge);   // DrapLang GUI 应用的宿主桥接
     wm.registerApp('edit',     createEditApp({ vfs }));
-    wm.registerApp('settings', createSettingsApp());
     wm.registerApp('about',    createAboutApp());
-    wm.registerApp('trash',    createTrashApp({ vfs }));
-    wm.registerApp('thispc',   createThisPCApp({ vfs }));
 
     // 应用管理助手：从注册表读取所有应用网格展示并启动
     wm.registerApp('appmgr', createAppManagerApp({ registry, vfs }));

@@ -1,0 +1,10 @@
+{
+  "id": "trash",
+  "name": "废纸篓",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "废纸篓（DrapLang 自举版：还原、清空）",
+  "category": "system"
+}

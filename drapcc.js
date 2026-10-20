@@ -44,7 +44,7 @@ const SYS_TABLE = {
   'win_invalidate': 0x49,
   'win_atoi':       0x4a,
   'itoa':           0x4c,
-  'win_mono':       0x50,   // 切换等宽字体（编辑器光标精确定位用）：win_mono(1) 开 / win_mono(0) 关
+  'win_mono':       0x56,   // 切换等宽字体（编辑器光标精确定位用）：win_mono(1) 开 / win_mono(0) 关
   // GUI 控件框架（win_gui）：声明式按钮 / 标签 / 输入框，宿主自动布局与命中
   'win_w':          0x4d,
   'win_h':          0x4e,
@@ -53,6 +53,11 @@ const SYS_TABLE = {
   'win_input_get':  0x52,
   'win_input':      0x53,
   'win_set_input':  0x70,   // 预设输入框内容（drapp 主动写，如预填文件路径）
+  // 主题 / 宿主桥接（双主题内容级适配 + drapp 自举应用）
+  'win_theme':          0x57, // 主题语义色：win_theme(0=bg 1=fg 2=accent 3=toolbar 4=sel)
+  'win_set_theme':      0x58, // 切换系统主题：win_set_theme("macos"|"windows")
+  'win_open_finder':    0x59, // 在 Finder 打开路径：win_open_finder(path)
+  'win_set_softkeyboard':0x5a, // 切换软键盘：win_set_softkeyboard(0|1)
   // 进程参数（CLI 工具读取命令行）
   'args_count': 0x60,
   'args_get':   0x61,
@@ -201,6 +206,10 @@ const SYS_ARGS = {
   'win_input_get':  1,
   'win_input':      5,
   'win_set_input':  2,
+  'win_theme':           1,
+  'win_set_theme':       1,
+  'win_open_finder':     1,
+  'win_set_softkeyboard': 1,
   'args_count': 0,
   'args_get':   1,
 };
@@ -915,14 +924,23 @@ export class DrapCC {
         : { kind: 'if', cond, then: branch, alt: chain };
     }
     this.insideEventHandler = true;          // 处理器体（含可能的 return）视为应用内上下文
+    this.currentEventHandler = 'nonclose';   // 非 close 处理器内的 return → 继续事件循环
+    this.loopContLabel = this.newLabel('lcont');   // 非 close 处理器 return 后跳到这里，再判是否 close
     if (chain) this.genStmt(chain);
+    this.currentEventHandler = null;
 
     // close：精确匹配完整事件串 'close'
+    this.emit('LABEL', [this.loopContLabel]);
     this.genExpr({ kind: 'bin', op: '==', left: { kind: 'ident', name: '__ev' }, right: { kind: 'str', value: 'close' } });
     this.emit('JZ', [loopStart]);
     const closeH = this.eventHandlers.get('on_close');
-    if (closeH) for (const st of closeH.body) this.genStmt(st);
-    this.insideEventHandler = false;
+    if (closeH) {
+      this.insideEventHandler = true;
+      this.currentEventHandler = 'on_close';   // on_close 内的 return → 退出应用
+      for (const st of closeH.body) this.genStmt(st);
+      this.insideEventHandler = false;
+      this.currentEventHandler = null;
+    }
     this.emit('JMP', [endL]);
 
     this.emit('LABEL', [endL]);
@@ -1088,8 +1106,10 @@ export class DrapCC {
 
   genReturn(s) {
     if (this.insideEventHandler) {
-      // 处理器内的 return 直接退出整个应用（跳到合成 main 结尾）
-      this.emit('JMP', [this.eventMainEndLabel]);
+      // 非 close 处理器内的 return → 回到事件循环（跳到 close 判定前）；
+      // on_close 内的 return → 退出整个应用（跳到合成 main 结尾）
+      if (this.currentEventHandler === 'on_close') this.emit('JMP', [this.eventMainEndLabel]);
+      else this.emit('JMP', [this.loopContLabel]);
       return;
     }
     if (s.expr) this.genExpr(s.expr);

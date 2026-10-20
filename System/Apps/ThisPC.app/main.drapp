@@ -1,0 +1,60 @@
+// ThisPC —— 此电脑（DrapLang 自举版，L7·D 阶段示范）
+// 列出若干卷/目录，单击在 Finder 打开对应路径（演示 win_open_finder + 主题语义色）。
+entry fn main() -> i32 {
+    let win = syscall win_create("此电脑", 460, 360)
+    let W = 0
+    let H = 0
+    let i = 0
+    let y = 0
+    let x = 0
+    let cy = 0
+    let id = ""
+    let sel = -1
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    syscall win_theme(1)
+    syscall win_set_font(15)
+    syscall win_text(16, 12, "此电脑")
+    syscall win_set_font(12)
+    syscall win_text(16, 36, "设备和驱动器（单击在 Finder 打开）")
+    i = 0
+    while (i < 5) {
+        y = 64 + i * 52
+        syscall win_theme(3)
+        syscall win_fill_rect(12, y, W - 24, 44)
+        syscall win_theme(2)
+        syscall win_fill_rect(22, y + 11, 22, 22)
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        if (i == 0) { syscall win_text(58, y + 14, "本地磁盘 (C:)"); syscall win_set_font(11); syscall win_text(58, y + 30, "/") }
+        else if (i == 1) { syscall win_text(58, y + 14, "用户主目录"); syscall win_set_font(11); syscall win_text(58, y + 30, "/Users/guest") }
+        else if (i == 2) { syscall win_text(58, y + 14, "系统"); syscall win_set_font(11); syscall win_text(58, y + 30, "/System") }
+        else if (i == 3) { syscall win_text(58, y + 14, "应用程序"); syscall win_set_font(11); syscall win_text(58, y + 30, "/Applications") }
+        else { syscall win_text(58, y + 14, "资源库"); syscall win_set_font(11); syscall win_text(58, y + 30, "/Library") }
+        i = i + 1
+    }
+    return 0
+}
+
+event fn on_click(ev: str) {
+    x = atoi(split(ev, " ")[1])
+    cy = atoi(split(ev, " ")[2])
+    sel = (cy - 64) / 52
+    if (sel >= 0 && sel < 5) {
+        if (sel == 0) { syscall win_open_finder("/") }
+        else if (sel == 1) { syscall win_open_finder("/Users/guest") }
+        else if (sel == 2) { syscall win_open_finder("/System") }
+        else if (sel == 3) { syscall win_open_finder("/Applications") }
+        else { syscall win_open_finder("/Library") }
+    }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

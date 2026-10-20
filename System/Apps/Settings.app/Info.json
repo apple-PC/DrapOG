@@ -1,0 +1,10 @@
+{
+  "id": "settings",
+  "name": "设置",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "系统设置（DrapLang 自举版：主题切换、软键盘开关）",
+  "category": "system"
+}

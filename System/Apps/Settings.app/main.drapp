@@ -1,0 +1,92 @@
+// Settings —— 系统设置（DrapLang 自举版，L7·D 阶段示范）
+// 分类：个性化 / 账户 / 通用 / 关于；主题切换与软键盘开关经宿主桥接 syscall 即时生效。
+// 模型：main 初始化共享状态与窗口；on_paint 自绘；on_click 处理侧栏分类与按钮。
+entry fn main() -> i32 {
+    let win = syscall win_create("设置", 520, 360)
+    let cat = 0
+    let theme = 0        // 0=macOS 1=Windows（本地跟踪，切换时同步给 WM）
+    let kb = 0           // 软键盘开关（本地跟踪）
+    let W = 0
+    let H = 0
+    let x = 0
+    let y = 0
+    let cx = 0
+    let id = ""
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    // 背景
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    // 侧栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 0, 128, H)
+    // 侧栏分类文字
+    syscall win_theme(1)
+    syscall win_set_font(13)
+    syscall win_text(16, 16, "个性化")
+    syscall win_text(16, 58, "账户")
+    syscall win_text(16, 100, "通用")
+    syscall win_text(16, 142, "关于")
+    // 当前分类高亮条（强调色）
+    syscall win_theme(2)
+    syscall win_fill_rect(0, cat * 42 + 8, 4, 30)
+    // 内容
+    cx = 150
+    if (cat == 0) {
+        syscall win_theme(1)
+        syscall win_set_font(18)
+        syscall win_text(cx, 16, "个性化")
+        syscall win_set_font(14)
+        syscall win_text(cx, 60, "系统主题")
+        syscall win_button("macos", cx + 150, 54, 70, 28)
+        syscall win_button("windows", cx + 230, 54, 80, 28)
+        syscall win_set_font(13)
+        if (theme == 0) { syscall win_text(cx, 100, "当前：macOS（切换即时生效）") }
+        else { syscall win_text(cx, 100, "当前：Windows 11（切换即时生效）") }
+    } else if (cat == 1) {
+        syscall win_theme(1)
+        syscall win_set_font(16)
+        syscall win_text(cx, 24, "guest")
+        syscall win_set_font(13)
+        syscall win_text(cx, 56, "本地账户 · 管理员")
+    } else if (cat == 2) {
+        syscall win_theme(1)
+        syscall win_set_font(14)
+        syscall win_text(cx, 16, "移动端软键盘")
+        syscall win_button("kb", cx + 150, 12, 52, 26)
+        syscall win_set_font(13)
+        if (kb == 0) { syscall win_text(cx, 50, "状态：关") }
+        else { syscall win_text(cx, 50, "状态：开") }
+    } else {
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        syscall win_text(cx, 16, "DrapOG · 自举原型")
+        syscall win_text(cx, 44, "DrapLang → DrapCC → DrapVM")
+    }
+    return 0
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    if (id == "macos") { syscall win_set_theme("macos"); theme = 0; syscall win_invalidate(win); return 0 }
+    if (id == "windows") { syscall win_set_theme("windows"); theme = 1; syscall win_invalidate(win); return 0 }
+    if (id == "kb") { kb = 1 - kb; syscall win_set_softkeyboard(kb); syscall win_invalidate(win); return 0 }
+    // 否则为侧栏坐标点击
+    x = atoi(split(ev, " ")[1])
+    y = atoi(split(ev, " ")[2])
+    if (x < 128) {
+        if (y >= 8 && y < 50) { cat = 0 }
+        else if (y >= 50 && y < 92) { cat = 1 }
+        else if (y >= 92 && y < 134) { cat = 2 }
+        else if (y >= 134 && y < 176) { cat = 3 }
+        syscall win_invalidate(win)
+    }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

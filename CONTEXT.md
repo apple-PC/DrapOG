@@ -805,6 +805,21 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **联动**：`menu.js` 用 `loadBiosSettings()` 决定默认选中项（cmd→CMD、gui→GUI、auto→按设备检测）与倒计时；倒计时 0 时关闭自动启动计时器。
 - 验证：test_bios.mjs（纯逻辑 + showSetup 交互，mock window/document/localStorage/canvas）18 断言全绿。
 
+### L6：DocEdit 文档编辑器（项目 2.0.0）
+- **DocEdit**（`System/Apps/DocEdit.app`，DrapLang 多行文本编辑器，办公级第一块拼图）：方向键/Home/End/退格/回车、滚动、点击定位光标、打开/保存任意路径、字数/行列统计、未保存标记；演示 `win_mono` 等宽字体（光标精确定位）+ `win_set_input` 输入框预填。`registry.addDrap('docedit', ...)` + dock 图标 + AppMgr，从桌面/dock 启动。
+- **两个关键 bug 修复**：
+  - `substr` 代码生成寄存器分配缺陷：`start` 放进 `r1` 后求值 `len` 表达式（`col-1`）会覆盖 `r1`，导致退格删末尾字符错误（`World`→`orld`）。修复：求值 `args[2]` 前先把 `src`/`start` 压栈保护。
+  - DBYTE 打包漏掉 `LEN` 指令（`len()` 运行期分发，按堆对象 `__type` 区分字符串/数组长度）：补 `LEN:49`，使含 `len()` 的程序可预编译/往返。
+- 验证：test_docedit.mjs 10 项全绿（退格→"Worl"、保存内容 `Hello\nWorl`、打开后重渲染）；test_diag.mjs / test_struct.mjs 全绿。
+
+### L7：C·SDK 脚手架 / D·自举深化 / E·GUI 体验（项目 2.2.0）
+- **D·自举深化**：把 `设置 / 废纸篓 / 此电脑` 三个 JS 宿主应用改写为真正的 DrapLang `.app`（`System/Apps/Settings.app`、`Trash.app`、`ThisPC.app`），`gui.js` 改为 `registry.addDrap` 注册、下线 JS 版本；Finder 的删除仍走 `moveToTrash` 等 VFS 辅助（保留）。
+  - 新增 syscalls（表驱动，无需动 VM 指令集）：`win_theme(slot)` 主题语义色（0=背景 1=前景 2=强调 3=工具栏 4=选中，双主题内容级适配）、`win_set_theme(name)`（经宿主钩子转 `wm.setTheme`）、`win_open_finder(path)`（转 `wm.openFinderAt`）、`win_set_softkeyboard(on)`；并修复既有 `0x50` 冲突（`time_now` 与 `win_mono` 争用同一 opcode，现 `win_mono` 改 `0x56`、`time_now` 保持 `0x50`）。
+- **E·GUI 体验**：桌面图标层（`renderDesktopIcons` + `hitDesktopIcon`，点击启动应用）、窗口吸附（`snapWindow`：左/右边缘→半屏、顶部→最大化）、双主题内容级适配（DocEdit/Settings/Trash/ThisPC 用 `win_theme` 读语义色，自动适配 macOS/Windows）。
+- **C·SDK 脚手架**：`System/Apps/_template.app` 规范化模板（事件驱动 + 主题感知 + 占位符）、`tools/mkapp.mjs` 生成器（`node tools/mkapp.mjs <id> [name] [--title ...] [--stdlib]`，替换占位符、可选注入并复制 `System/Lib/stdlib.drapp` 共享标准库、编译校验）、`System/Lib/stdlib.drapp` 共享库（clamp/max2/min2/sign/abs 等纯函数，应用 `import "stdlib"` 复用）。
+- **编译器关键修复**：`genReturn` 在 event handler 内的 `return` 原先一律跳到合成 main 结尾、退出整个事件循环（导致 handler 末尾 `return 0` 后窗口不再响应后续事件）；现改为非 `on_close` 的 handler `return` 回到事件循环继续、`on_close` 的 `return` 才退出应用。此修复让 DrapLang 的 GUI 应用能正常连续处理多事件（Settings/Trash/ThisPC 的多轮交互依赖它）。
+- 验证：test_drapps.mjs 13 项全绿（Settings 主题切换/软键盘、Trash 还原/清空、ThisPC 打开 Finder）；test_sdk.mjs 6 项全绿（mkapp 生成 + 编译）；全套 26 个测试文件回归无回归。
+
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
 - cmd.js 顶层 `await registry.scan(...)` 置于非 async 流程导致 `SyntaxError` → 改 fire-and-forget `registry.scan(...).catch(()=>{})`。
@@ -815,7 +830,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - test_modules.mjs 8 项全绿（文件级模块）。
 - test_l4.mjs 20 项全绿：scan 采元数据、CLI 运行、dbyte 入口（验证 BUILTIN 序列化）、shell 的 pack/apps/info/install/uninstall。
 - test_api.mjs 接口完整性验证全绿：fs_append/fs_copy/fs_move/fs_size/fs_isdir、time_format/time_sleep、itoa/replace/join/charAt/sin/cos/log/exp、argv 全链路（退出码 42 + 参数透传）。
-- 全套 13 个测试文件（api/b7/shell/host/gui/paint/finder/draplang/event/stdlib/registry/modules/l4）全绿，无回归。
+- 全套 26 个测试文件（含 l6/l7/sdk 等）全绿，无回归。
 
 ---
-最后更新：2026-10-18　当前版本：2.0.0
+最后更新：2026-10-20　当前版本：2.2.0

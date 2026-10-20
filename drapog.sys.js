@@ -12,7 +12,7 @@ export class DrapSYS {
    * @param {Object} opts.vfs                      虚拟文件系统
    * @param {Function} opts.out                    输出回调
    */
-  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec }) {
+  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard }) {
     this.vm = vm;
     this.vfs = vfs;
     this.out = out || (() => {});
@@ -28,6 +28,11 @@ export class DrapSYS {
     // GUI 自举底层工具（DrapLang 经此创建窗口 / 绘制 / 响应输入）
     this.onWinCreate = onWinCreate || null;   // (opts) => realWinId  宿主创建真实 WM 窗口
     this.onWinClose = onWinClose || null;     // (winId) => void      宿主关闭真实 WM 窗口
+    // 宿主桥接钩子（GUI 型 drapp 调用宿主能力用）
+    this.getTheme = getTheme || null;         // () => [ [r,g,b]×5 ]  当前主题语义色板（bg/fg/accent/toolbar/sel）
+    this.onSetTheme = onSetTheme || null;     // (name) => void       切换主题（wm.setTheme）
+    this.onOpenFinder = onOpenFinder || null; // (path) => void        在 Finder 打开路径（wm.openFinderAt）
+    this.onSetSoftKeyboard = onSetSoftKeyboard || null; // (on) => void  切换软键盘（wm.softKeyboard.open）
     this.drapWins = new Map(); // winId -> { queue, resolver, drawOps, style, title, dirty }
     this.curWinId = null;      // 当前绘制 / 输入目标窗口
 
@@ -71,7 +76,7 @@ export class DrapSYS {
       0x49: this.win_invalidate.bind(this),
       0x4a: this.win_atoi.bind(this),
       0x4c: this.itoa.bind(this),
-      0x50: this.win_mono.bind(this),
+      0x56: this.win_mono.bind(this),   // 注：0x50 已分给 time_now，此处移开避免冲突
       0x4d: this.win_w.bind(this),
       0x4e: this.win_h.bind(this),
       0x4f: this.win_button.bind(this),
@@ -79,6 +84,10 @@ export class DrapSYS {
       0x52: this.win_input_get.bind(this),
       0x53: this.win_input.bind(this),
       0x70: this.win_set_input.bind(this),
+      0x57: this.win_theme.bind(this),         // 主题语义色：slot 0=bg 1=fg 2=accent 3=toolbar 4=sel
+      0x58: this.win_set_theme.bind(this),     // 切换系统主题（macos/windows）
+      0x59: this.win_open_finder.bind(this),   // 在 Finder 打开路径
+      0x5a: this.win_set_softkeyboard.bind(this), // 切换移动端软键盘
       0x60: this.args_count.bind(this),
       0x61: this.args_get.bind(this),
     };
@@ -377,6 +386,37 @@ export class DrapSYS {
     const st = this._cur();
     if (!st) return 0;
     st.inputs.set(this.vm.readStr(idPtr), this.vm.readStr(valPtr));
+    return 0;
+  }
+
+  // 主题语义色：slot 0=背景 1=前景 2=强调 3=工具栏 4=选中，设置当前绘制色（双主题内容级适配用）
+  win_theme(slot) {
+    const st = this._cur();
+    if (!st) return 0;
+    let c = [255, 255, 255];
+    if (typeof this.getTheme === 'function') {
+      const pal = this.getTheme();
+      if (Array.isArray(pal)) c = pal[slot & 7] || c;
+    }
+    st.style.color = [c[0] & 255, c[1] & 255, c[2] & 255];
+    return 0;
+  }
+
+  // 切换系统主题（drapp 版「设置」调用；宿主钩子转 wm.setTheme）
+  win_set_theme(namePtr) {
+    if (typeof this.onSetTheme === 'function') this.onSetTheme(this.vm.readStr(namePtr));
+    return 0;
+  }
+
+  // 在 Finder 打开路径（drapp 版「此电脑」双击调用）
+  win_open_finder(pathPtr) {
+    if (typeof this.onOpenFinder === 'function') this.onOpenFinder(this.vm.readStr(pathPtr));
+    return 0;
+  }
+
+  // 切换移动端软键盘（drapp 版「设置」调用）
+  win_set_softkeyboard(on) {
+    if (typeof this.onSetSoftKeyboard === 'function') this.onSetSoftKeyboard(on != 0);
     return 0;
   }
 

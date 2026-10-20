@@ -38,11 +38,11 @@ entry fn main() -> i32 {
 event fn on_paint() {
     let w = syscall win_w()
     let h = syscall win_h()
-    // 编辑器背景
-    syscall win_set_color(24, 26, 32)
+    // 编辑器背景（主题语义色）
+    syscall win_theme(0)
     syscall win_fill_rect(0, 0, w, h)
     // 工具栏
-    syscall win_set_color(32, 34, 42)
+    syscall win_theme(3)
     syscall win_fill_rect(0, 0, w, 30)
     syscall win_button("打开", 8, 4, 56, 22)
     syscall win_button("保存", 72, 4, 56, 22)
@@ -52,7 +52,7 @@ event fn on_paint() {
     i = scroll
     while (i < scroll + vis) {
         if (i < len(lines)) {
-            syscall win_set_color(228, 228, 232)
+            syscall win_theme(1)
             syscall win_text(4, 36 + (i - scroll) * 20, lines[i])
         }
         i = i + 1
@@ -61,11 +61,11 @@ event fn on_paint() {
     if (row >= scroll && row < scroll + vis) {
         cx = 4 + col * 9
         cy = 36 + (row - scroll) * 20
-        syscall win_set_color(10, 132, 255)
+        syscall win_theme(2)
         syscall win_fill_rect(cx, cy, 2, 20)
     }
     // 状态栏
-    syscall win_set_color(32, 34, 42)
+    syscall win_theme(3)
     syscall win_fill_rect(0, h - 22, w, 22)
     total = 0
     i = 0
@@ -75,7 +75,7 @@ event fn on_paint() {
     if (eff == "") { eff = path }
     mark = ""
     if (dirty == 1) { mark = "  *未保存" }
-    syscall win_set_color(180, 184, 196)
+    syscall win_theme(1)
     syscall win_text(8, h - 18, "行 " + itoa(row + 1) + "/" + itoa(len(lines)) + "  列 " + itoa(col) + "  字符 " + itoa(total) + "  " + eff + mark)
 }
 

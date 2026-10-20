@@ -15,16 +15,25 @@ export function normalizeTheme(t) {
 /** 主题外观配置：窗口控件位置/样式、顶部菜单栏 vs 无、底部 dock vs 任务栏、壁纸渐变 */
 const THEMES = {
   macos:   { controlsSide: 'left',  controls: 'circles', topBar: 'menubar', bottomBar: 'dock',
-             wall: ['#1b2a4a', '#3a1c4a', '#0d0d12'] },
+             wall: ['#1b2a4a', '#3a1c4a', '#0d0d12'],
+             palette: { bg: [38,38,42], fg: [232,232,237], accent: [10,132,255], toolbar: [46,46,50], sel: [10,132,255] } },
   windows: { controlsSide: 'right', controls: 'squares', topBar: 'none',    bottomBar: 'taskbar',
-             wall: ['#0a3d91', '#0f6cbd', '#04122b'] },
+             wall: ['#0a3d91', '#0f6cbd', '#04122b'],
+             palette: { bg: [32,32,36], fg: [232,232,237], accent: [15,108,189], toolbar: [40,40,46], sel: [15,108,189] } },
 };
+
+// 主题语义色板展平为固定顺序数组，供 drapp 经 win_theme(slot) 读取
+function paletteArray(theme) {
+  const p = (theme && theme.palette) || { bg: [0,0,0], fg: [255,255,255], accent: [10,132,255], toolbar: [40,40,40], sel: [10,132,255] };
+  return [p.bg, p.fg, p.accent, p.toolbar, p.sel];
+}
 
 export class WindowManager {
   constructor(canvas, opts = {}) {
     this.theme = normalizeTheme(opts.theme);
     this.themeConfigs = opts.themeConfigs || {};   // 来自 System/Themes/<id>.json
     this.T = Object.assign({}, THEMES[this.theme], this.themeConfigs[this.theme] || {});
+    this.T.palette = paletteArray(this.T);
     this.TASKBAR_H = this.T.taskbarH || 48;
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
@@ -65,6 +74,7 @@ export class WindowManager {
   setTheme(theme) {
     this.theme = normalizeTheme(theme);
     this.T = Object.assign({}, THEMES[this.theme], this.themeConfigs[this.theme] || {});
+    this.T.palette = paletteArray(this.T);
     this.TASKBAR_H = this.T.taskbarH || 48;
   }
 
@@ -290,7 +300,11 @@ export class WindowManager {
     }
 
     const w = this.hitTest(x, y);
-    if (!w) return;
+    if (!w) {
+      const di = this.hitDesktopIcon(x, y);
+      if (di) { this.launchApp(di); return; }
+      return;
+    }
     this.bringToFront(w.id);
 
     const btn = this.hitButton(w, x, y);
@@ -338,6 +352,9 @@ export class WindowManager {
           this._lastClick = { id: w.id, t: now };
         }
       }
+    } else if (this.dragState && this.dragState.moved) {
+      const w = this.windows.find(w => w.id === this.dragState.id);
+      if (w) this.snapWindow(w, x, y);
     }
     this.dragState = null;
   }
@@ -368,7 +385,7 @@ export class WindowManager {
     if (this.T.bottomBar === 'dock') { if (this.hitDock(x, y)) return 'pointer'; }
     else { if (this.hitTaskbar(x, y)) return 'pointer'; }
     const w = this.hitTest(x, y);
-    if (!w) return 'default';
+    if (!w) return this.hitDesktopIcon(x, y) ? 'pointer' : 'default';
     if (this.hitButton(w, x, y)) return 'pointer';
     if (this.hitTitleBar(w, x, y)) return 'grab';
     if (this.hitContent(w, x, y)) {
@@ -519,6 +536,7 @@ export class WindowManager {
   render() {
     const W = this.W(), H = this.H();
     this.renderWallpaper(W, H);
+    this.renderDesktopIcons(W, H);
     for (const id of this.zOrder) {
       const w = this.windows.find(w => w.id === id);
       if (w && !w.minimized) this.renderWindow(w);
@@ -531,6 +549,66 @@ export class WindowManager {
     if (this.ctxMenu) this.renderContextMenu();
     if (this.locked) this.renderLock();
     if (this.shutdown) this.renderShutdown();
+  }
+
+  /* ---------- 桌面图标（点击启动应用） ---------- */
+  bottomBarH() { return this.T.bottomBar === 'dock' ? (this.DOCK_H + this.DOCK_MARGIN * 2) : this.TASKBAR_H; }
+
+  desktopIconLayout(W, H) {
+    const tile = 60, gap = 12, x0 = 18;
+    const y0 = (this.T.topBar === 'menubar' ? this.MENU_BAR_H : 0) + 16;
+    const avail = H - y0 - this.bottomBarH() - 16;
+    const perCol = Math.max(1, Math.floor(avail / (tile + gap + 20)));
+    const cells = [];
+    for (let i = 0; i < this.apps.length; i++) {
+      const col = Math.floor(i / perCol), row = i % perCol;
+      const x = x0 + col * (tile + gap);
+      const y = y0 + row * (tile + gap + 20);
+      cells.push({ x, y, tile, letter: this.apps[i].letter, title: this.apps[i].title, id: this.apps[i].id });
+    }
+    return { cells };
+  }
+
+  renderDesktopIcons(W, H) {
+    const ctx = this.ctx;
+    const { cells } = this.desktopIconLayout(W, H);
+    for (const c of cells) {
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      this.roundRect(c.x, c.y, c.tile, c.tile, 12); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.font = '26px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(c.letter, c.x + c.tile / 2, c.y + c.tile / 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.font = '12px -apple-system, sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+      ctx.fillText(c.title.slice(0, 6), c.x + c.tile / 2, c.y + c.tile + 4);
+    }
+  }
+
+  hitDesktopIcon(x, y) {
+    const { cells } = this.desktopIconLayout(this.W(), this.H());
+    for (const c of cells) {
+      if (x >= c.x && x <= c.x + c.tile && y >= c.y && y <= c.y + c.tile) {
+        return { id: c.id, letter: c.letter, title: c.title };
+      }
+    }
+    return null;
+  }
+
+  // 拖拽落点吸附：左/右边缘 → 半屏；顶部 → 最大化
+  snapWindow(w, x, y) {
+    if (w.maximized) return;
+    const wa = this.workArea();
+    const zone = 12;
+    const W = this.W(), H = this.H();
+    if (w.x <= zone) {
+      w.x = 0; w.y = wa.top; w.w = Math.floor(W / 2); w.h = H - wa.top - wa.bottom; w.prevRect = null;
+    } else if (w.x + w.w >= W - zone) {
+      w.x = Math.floor(W / 2); w.y = wa.top; w.w = W - Math.floor(W / 2); w.h = H - wa.top - wa.bottom; w.prevRect = null;
+    } else if (w.y <= wa.top + zone) {
+      this.toggleMaximize(w.id);
+    }
   }
 
   renderWallpaper(W, H) {
