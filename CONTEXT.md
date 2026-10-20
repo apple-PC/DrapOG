@@ -820,6 +820,18 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **编译器关键修复**：`genReturn` 在 event handler 内的 `return` 原先一律跳到合成 main 结尾、退出整个事件循环（导致 handler 末尾 `return 0` 后窗口不再响应后续事件）；现改为非 `on_close` 的 handler `return` 回到事件循环继续、`on_close` 的 `return` 才退出应用。此修复让 DrapLang 的 GUI 应用能正常连续处理多事件（Settings/Trash/ThisPC 的多轮交互依赖它）。
 - 验证：test_drapps.mjs 13 项全绿（Settings 主题切换/软键盘、Trash 还原/清空、ThisPC 打开 Finder）；test_sdk.mjs 6 项全绿（mkapp 生成 + 编译）；全套 26 个测试文件回归无回归。
 
+### L8：窗口缩放 + macOS 风格菜单栏（项目 2.3.0）
+- **窗口缩放**（drapog.wm.js）：窗口四边 + 四角 6px 热区（`hitResize` 返回 n/s/e/w/ne/nw/se/sw），按下记录基准几何（`dragState.mode='resize'` + `orig`），拖动期间 `applyResize` 按方向实时计算：
+  - 最小尺寸钳制 280×160（`RESIZE_MIN_W/H`）；北缘不越过菜单栏（`workArea().top`），东/南缘不越过屏幕；西/北缩放时对侧边缘固定。
+  - 最大化窗口 `hitResize` 直接返回 null（不可缩放）。
+  - 光标随方向变化：`ns-resize`/`ew-resize`/`nwse-resize`/`nesw-resize`（`getCursor` 在 `hitButton` 之后、`hitTitleBar` 之前判定，北缘 6px 优先于拖动）。
+  - 事件模型重构：`dragState` 增加 `mode`（'move'/'resize'），双击标题栏最大化与拖拽吸附（`snapWindow`）均只在 `mode='move'` 时触发，缩放结束不吸附。
+- **macOS 风格菜单栏**（`renderMenuBar` 重写 + `menuBarLayout`）：对齐真实 macOS 顶栏布局——
+  - 左侧：`` Apple 标志（点击仍弹主菜单）→ 焦点应用名加粗（无焦点窗口显示「访达」）→ 应用菜单项（文件/编辑/显示/前往/窗口/帮助，装饰性，间距按 `measureText` 排布）。
+  - 右侧（从右到左）：时间 `HH:MM` → 日期 `10月21日 周三` → 软键盘切换按钮（`kbButtonRect` 移至 `W-210, w=36`，点击切软键盘行为不变）→ WiFi 图标（`drawWifiIcon` 两段弧+圆点）→ 电池图标（`drawBattery`，80% 示意电量，<20% 变红）。
+  - 底色由 `rgba(0,0,0,0.35)` 调为 `rgba(15,15,20,0.45)`。
+- 验证：新增 test_wm.mjs 24 项全绿（8 方向缩放/最小尺寸钳制/菜单栏与屏幕边界钳制/最大化禁缩放/光标反馈/拖动+吸附回归/菜单栏布局与渲染冒烟）；全套 27 个测试文件回归无回归。
+
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
 - cmd.js 顶层 `await registry.scan(...)` 置于非 async 流程导致 `SyntaxError` → 改 fire-and-forget `registry.scan(...).catch(()=>{})`。
@@ -833,4 +845,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 26 个测试文件（含 l6/l7/sdk 等）全绿，无回归。
 
 ---
-最后更新：2026-10-20　当前版本：2.2.0
+最后更新：2026-10-21　当前版本：2.3.0

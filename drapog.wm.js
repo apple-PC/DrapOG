@@ -2,7 +2,7 @@
  * @file        drapog.wm.js
  * @module      drapog/wm
  * @summary     窗口管理器（支持应用内容）
- * @version     0.6.0
+ * @version     0.7.0
  */
 
 import { appIcon } from './drapog.registry.js';
@@ -47,6 +47,11 @@ export class WindowManager {
     this.DOCK_H = 60;
     this.DOCK_MARGIN = 8;
     this.DOCK_ICON = 44;
+
+    // 窗口缩放：边缘/角落热区宽度与最小尺寸
+    this.RESIZE_EDGE = 6;
+    this.RESIZE_MIN_W = 280;
+    this.RESIZE_MIN_H = 160;
 
     // 软键盘（移动端调用实体键盘用）
     this.softKeyboard = { open: false };
@@ -222,6 +227,49 @@ export class WindowManager {
         && y >= w.y + w.TITLEBAR_H && y < w.y + w.h;
   }
 
+  // 窗口边缘/角落缩放热区：返回 'n'/'s'/'e'/'w'/'ne'/'nw'/'se'/'sw' 或 null
+  hitResize(w, x, y) {
+    if (w.maximized) return null;
+    const E = this.RESIZE_EDGE;
+    const west  = x >= w.x && x < w.x + E;
+    const east  = x >= w.x + w.w - E && x < w.x + w.w;
+    const north = y >= w.y && y < w.y + E;
+    const south = y >= w.y + w.h - E && y < w.y + w.h;
+    if (!west && !east && !north && !south) return null;
+    return (north ? 'n' : south ? 's' : '') + (west ? 'w' : east ? 'e' : '');
+  }
+
+  // 按方向应用缩放（以按下时的几何为基准，拖动期间实时计算）
+  applyResize(w, x, y) {
+    const d = this.dragState;
+    if (w.maximized) return;
+    d.moved = true;
+    const minW = this.RESIZE_MIN_W, minH = this.RESIZE_MIN_H;
+    const W = this.W(), H = this.H();
+    const wa = this.workArea();
+    const o = d.orig, dir = d.dir;
+    let nx = o.x, ny = o.y, nw = o.w, nh = o.h;
+    if (dir.includes('e')) {
+      const right = Math.min(Math.max(o.x + o.w + (x - d.sx), o.x + minW), W);
+      nw = right - o.x;
+    }
+    if (dir.includes('s')) {
+      const bottom = Math.min(Math.max(o.y + o.h + (y - d.sy), o.y + minH), H);
+      nh = bottom - o.y;
+    }
+    if (dir.includes('w')) {
+      const left = Math.min(Math.max(o.x + (x - d.sx), 0), o.x + o.w - minW);
+      nx = left; nw = o.x + o.w - left;
+    }
+    if (dir.includes('n')) {
+      const top = Math.min(Math.max(o.y + (y - d.sy), wa.top), o.y + o.h - minH);
+      ny = top; nh = o.y + o.h - top;
+    }
+    w.x = Math.round(nx); w.y = Math.round(ny);
+    w.w = Math.round(nw); w.h = Math.round(nh);
+    w.needRedraw = true;
+  }
+
   dockLayout() {
     const icons = this.apps;
     const minis = this.minimizedWindows();
@@ -312,8 +360,14 @@ export class WindowManager {
     if (btn === 'minimize') { this.minimizeWindow(w.id); return; }
     if (btn === 'maximize') { this.toggleMaximize(w.id); return; }
 
+    const dir = this.hitResize(w, x, y);
+    if (dir) {
+      this.dragState = { id: w.id, mode: 'resize', dir, sx: x, sy: y, orig: { x: w.x, y: w.y, w: w.w, h: w.h }, moved: false };
+      return;
+    }
+
     if (this.hitTitleBar(w, x, y)) {
-      this.dragState = { id: w.id, offsetX: x - w.x, offsetY: y - w.y, moved: false };
+      this.dragState = { id: w.id, mode: 'move', offsetX: x - w.x, offsetY: y - w.y, moved: false };
       return;
     }
 
@@ -331,6 +385,7 @@ export class WindowManager {
     if (!this.dragState) return;
     const w = this.windows.find(w => w.id === this.dragState.id);
     if (!w) { this.dragState = null; return; }
+    if (this.dragState.mode === 'resize') { this.applyResize(w, x, y); return; }
     if (w.maximized) return;
     this.dragState.moved = true;
     w.x = x - this.dragState.offsetX;
@@ -341,7 +396,7 @@ export class WindowManager {
   }
 
   onMouseUp(x, y) {
-    if (this.dragState && !this.dragState.moved) {
+    if (this.dragState && !this.dragState.moved && this.dragState.mode === 'move') {
       const w = this.windows.find(w => w.id === this.dragState.id);
       if (w && this.hitTitleBar(w, x, y) && !this.hitButton(w, x, y)) {
         const now = Date.now();
@@ -352,7 +407,7 @@ export class WindowManager {
           this._lastClick = { id: w.id, t: now };
         }
       }
-    } else if (this.dragState && this.dragState.moved) {
+    } else if (this.dragState && this.dragState.moved && this.dragState.mode === 'move') {
       const w = this.windows.find(w => w.id === this.dragState.id);
       if (w) this.snapWindow(w, x, y);
     }
@@ -387,6 +442,13 @@ export class WindowManager {
     const w = this.hitTest(x, y);
     if (!w) return this.hitDesktopIcon(x, y) ? 'pointer' : 'default';
     if (this.hitButton(w, x, y)) return 'pointer';
+    const rdir = this.hitResize(w, x, y);
+    if (rdir) {
+      if (rdir === 'n' || rdir === 's') return 'ns-resize';
+      if (rdir === 'e' || rdir === 'w') return 'ew-resize';
+      if (rdir === 'ne' || rdir === 'sw') return 'nesw-resize';
+      return 'nwse-resize';
+    }
     if (this.hitTitleBar(w, x, y)) return 'grab';
     if (this.hitContent(w, x, y)) {
       const app = this.getApp(w.appId);
@@ -402,8 +464,8 @@ export class WindowManager {
 
   toggleSoftKeyboard() { this.softKeyboard.open = !this.softKeyboard.open; }
 
-  // 菜单栏右侧的键盘切换按钮
-  kbButtonRect(W) { return { x: W - 92, y: 4, w: 40, h: this.MENU_BAR_H - 8 }; }
+  // 菜单栏右侧的键盘切换按钮（位于 WiFi 图标与日期之间）
+  kbButtonRect(W) { return { x: W - 210, y: 4, w: 36, h: this.MENU_BAR_H - 8 }; }
   hitMenuBar(x, y) {
     const W = this.W();
     const r = this.kbButtonRect(W);
@@ -1059,45 +1121,111 @@ export class WindowManager {
     ctx.textAlign = 'left';
   }
 
+  // macOS 风格菜单栏布局：左 = Apple 标志 + 焦点应用名（加粗）+ 应用菜单；右 = 状态区
+  menuBarLayout(W) {
+    const focusWin = this.focusedId ? this.windows.find(w => w.id === this.focusedId) : null;
+    const focusApp = focusWin ? this.apps.find(a => a.id === focusWin.appId) : null;
+    return {
+      menus: ['文件', '编辑', '显示', '前往', '窗口', '帮助'],
+      appName: focusApp ? focusApp.title : '访达',
+      appNameX: 40,
+    };
+  }
+
   renderMenuBar(W) {
     const ctx = this.ctx;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.fillStyle = 'rgba(15, 15, 20, 0.45)';
     ctx.fillRect(0, 0, W, this.MENU_BAR_H);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    ctx.font = '14px -apple-system, sans-serif';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('◆  DrapOG', 14, this.MENU_BAR_H / 2);
 
-    // 显示当前焦点应用名
-    if (this.focusedId) {
-      const w = this.windows.find(w => w.id === this.focusedId);
-      if (w) {
-        const app = this.apps.find(a => a.id === w.appId);
-        if (app) {
-          ctx.font = '600 13px -apple-system, sans-serif';
-          ctx.fillText(app.title, 130, this.MENU_BAR_H / 2);
-        }
-      }
+    const L = this.menuBarLayout(W);
+    const cy = this.MENU_BAR_H / 2;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+
+    // Apple 标志（点击弹主菜单）
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
+    ctx.font = '15px -apple-system, sans-serif';
+    ctx.fillText('', 14, cy + 1);
+
+    // 焦点应用名（加粗；无焦点窗口时显示访达）
+    ctx.font = '600 13.5px -apple-system, sans-serif';
+    ctx.fillText(L.appName, L.appNameX, cy + 0.5);
+
+    // 应用菜单项（文件 编辑 显示 前往 窗口 帮助）
+    ctx.font = '13.5px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    let mx = L.appNameX + ctx.measureText(L.appName).width + 24;
+    for (const m of L.menus) {
+      ctx.fillText(m, mx, cy + 0.5);
+      mx += ctx.measureText(m).width + 20;
     }
 
     const now = new Date();
+    const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
     const hh = String(now.getHours()).padStart(2, '0');
     const mm = String(now.getMinutes()).padStart(2, '0');
-    ctx.font = '14px -apple-system, sans-serif';
+    ctx.font = '13px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
     ctx.textAlign = 'right';
-    ctx.fillText(hh + ':' + mm, W - 14, this.MENU_BAR_H / 2);
+    ctx.fillText(hh + ':' + mm, W - 14, cy + 0.5);
+    ctx.fillText((now.getMonth() + 1) + '月' + now.getDate() + '日 ' + week, W - 66, cy + 0.5);
+    ctx.textAlign = 'left';
 
     // 软键盘切换按钮（移动端用它调出实体键盘）
     const kb = this.kbButtonRect(W);
-    ctx.fillStyle = this.softKeyboard.open ? 'rgba(10,132,255,0.45)' : 'rgba(255,255,255,0.14)';
-    this.roundRect(kb.x, kb.y, kb.w, kb.h, 7);
+    ctx.fillStyle = this.softKeyboard.open ? 'rgba(10,132,255,0.5)' : 'rgba(255,255,255,0.16)';
+    this.roundRect(kb.x, kb.y, kb.w, kb.h, 6);
     ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.font = '15px -apple-system, sans-serif';
+    ctx.font = '14px -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('⌨', kb.x + kb.w / 2, kb.y + kb.h / 2);
+    ctx.fillText('⌨', kb.x + kb.w / 2, kb.y + kb.h / 2 + 0.5);
+    ctx.textAlign = 'left';
+
+    // WiFi 图标
+    this.drawWifiIcon(W - 226, cy, 8);
+    // 电池（示意电量 80%）
+    this.drawBattery(W - 247, cy, 22, 0.8, '80%');
+  }
+
+  // WiFi 状态图标（两段弧 + 圆点，朝上展开）
+  drawWifiIcon(cx, cy, r) {
+    const ctx = this.ctx;
+    const base = cy + r * 0.75;
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    for (const rr of [r, r * 0.58]) {
+      ctx.beginPath();
+      ctx.arc(cx, base, rr, Math.PI * 1.25, Math.PI * 1.75);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.arc(cx, base - 1.5, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 电池图标：rightX 为电池右缘，level 为电量比例（<0.2 变红），label 为百分比文字
+  drawBattery(rightX, cy, w, level, label) {
+    const ctx = this.ctx;
+    const h = 11, y = cy - h / 2, x = rightX - w;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1;
+    this.roundRect(x, y, w, h, 3);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillRect(rightX + 1.5, y + 3, 2, h - 6);
+    ctx.fillStyle = level > 0.2 ? 'rgba(255,255,255,0.92)' : '#ff5f57';
+    this.roundRect(x + 2, y + 2, Math.max(1, (w - 4) * level), h - 4, 2);
+    ctx.fill();
+    if (label) {
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.font = '12px -apple-system, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(label, x - 6, cy + 0.5);
+      ctx.textAlign = 'left';
+    }
   }
 
   renderDock(W, H) {
