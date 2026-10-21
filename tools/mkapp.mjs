@@ -7,11 +7,11 @@
 //   - --stdlib：注入 `import "stdlib"` 并把 System/Lib/stdlib.drapp 复制到新包目录
 //   - 编译校验，确保生成的应用可编译通过
 // 生成后，把应用接入桌面：在 System/Boot/gui.js 的 registry.addDrap('id', {...}) 注册，
-// 并把 id 加进 drapog.wm.js 的 this.apps（dock + 桌面图标）。
+// 并把 id 加进 src/drapog.wm.js 的 this.apps（dock + 桌面图标）。
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { DrapCC } from '../drapcc.js';
+import { DrapCC } from '../src/drapcc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -81,4 +81,4 @@ console.log('  registry.addDrap(\'' + id + '\', { name: \'' + name + '\', icon: 
 console.log('    file: \'../Apps/' + id + '.app/main.drapp\', baseUrl: import.meta.url,');
 if (withStdlib) console.log('    modules: [\'stdlib\'],');
 console.log('    version: \'1.0\', author: \'you\', description: \'' + name + '\', category: \'uncategorized\' });');
-console.log('并把 \'' + id + '\' 加入 drapog.wm.js 的 this.apps 数组（dock + 桌面图标）。');
+console.log('并把 \'' + id + '\' 加入 src/drapog.wm.js 的 this.apps 数组（dock + 桌面图标）。');

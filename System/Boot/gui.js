@@ -5,16 +5,16 @@
  * @version     1.1.0
  */
 
-import { WindowManager } from '../../drapog.wm.js';
-import { VFS } from '../../drapog.vfs.js';
-import { DrapShell } from '../../drapog.shell.js';
+import { WindowManager } from '../src/drapog.wm.js';
+import { VFS } from '../src/drapog.vfs.js';
+import { DrapShell } from '../src/drapog.shell.js';
 import {
   createFinderApp, createTerminalApp, createAppManagerApp,
   createEditApp, createAboutApp,
-} from '../../drapog.apps.js';
-import { DrapSYS } from '../../drapog.sys.js';
-import { drapAppBridge } from '../../drapog.launcher.js';
-import { AppRegistry } from '../../drapog.registry.js';
+} from '../src/drapog.apps.js';
+import { DrapSYS } from '../src/drapog.sys.js';
+import { drapAppBridge } from '../src/drapog.launcher.js';
+import { AppRegistry } from '../src/drapog.registry.js';
 
 // 是否移动端（与 BIOS 菜单同一判据）
 function isMobileDevice() {
@@ -196,9 +196,8 @@ export async function startGUI(opts = {}) {
     window.addEventListener('paste',     onPaste);
     window.addEventListener('resize',    onResize);
 
-    // 启动 Finder + Terminal 各一个
-    wm.launchApp({ id: 'finder',   letter: 'F', title: 'Finder' });
-    wm.launchApp({ id: 'terminal', letter: '>', title: 'Terminal' });
+    // 启动 Finder（Terminal 从 Dock 启动，避免调试期多开窗口）
+    wm.launchApp({ id: 'finder', letter: 'F', title: 'Finder' });
 
   // 自举验证：自动启动一个用 DrapLang 编写的 GUI 应用（证明 GUI 能由 DrapLang 自举）
   registry.launch('calc', { wm, vfs }).catch(err => console.warn('DrapLang 示例加载失败（可忽略）', err));

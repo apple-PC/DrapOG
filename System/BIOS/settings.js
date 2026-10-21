@@ -11,8 +11,8 @@
  * @author      Whetstone Project
  */
 
-import { VFS } from '../../drapog.vfs.js';
-import { idbGet } from '../../drapog.idb.js';
+import { VFS } from '../../src/drapog.vfs.js';
+import { idbGet } from '../../src/drapog.idb.js';
 
 export const SETTINGS_PATH = '/System/Settings/bios.json';
 const IDB_ROOT_KEY = 'rootHandle';   // 记住上次挂载的文件夹（与 shell 一致）

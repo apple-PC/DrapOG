@@ -21,7 +21,7 @@ function isMobileDevice() {
 
 /**
  * 显示启动菜单，等待用户选择
- * @param {import('../../drapog.vfs.js').VFS} vfs 用于读取项目设置文件
+ * @param {import('../../src/drapog.vfs.js').VFS} vfs 用于读取项目设置文件
  * @returns {Promise<void>}
  */
 export async function showBootMenu(vfs) {
