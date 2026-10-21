@@ -5,13 +5,13 @@
  * @version     0.9.0
  */
 
-import { VM } from '../src/drapog.vm.js';
-import { DrapCC } from '../src/drapcc.js';
-import { DrapShell } from '../src/drapog.shell.js';
-import { VFS } from '../src/drapog.vfs.js';
-import { DrapSYS } from '../src/drapog.sys.js';
-import { makeLineWriter } from '../src/drapog.stream.js';
-import { AppRegistry } from '../src/drapog.registry.js';
+import { VM } from '../../src/drapog.vm.js';
+import { DrapCC } from '../../src/drapcc.js';
+import { DrapShell } from '../../src/drapog.shell.js';
+import { VFS } from '../../src/drapog.vfs.js';
+import { DrapSYS } from '../../src/drapog.sys.js';
+import { makeLineWriter } from '../../src/drapog.stream.js';
+import { AppRegistry } from '../../src/drapog.registry.js';
 
 const screen = document.getElementById('screen');
 

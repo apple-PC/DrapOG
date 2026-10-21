@@ -5,16 +5,16 @@
  * @version     1.1.0
  */
 
-import { WindowManager } from '../src/drapog.wm.js';
-import { VFS } from '../src/drapog.vfs.js';
-import { DrapShell } from '../src/drapog.shell.js';
+import { WindowManager } from '../../src/drapog.wm.js';
+import { VFS } from '../../src/drapog.vfs.js';
+import { DrapShell } from '../../src/drapog.shell.js';
 import {
   createFinderApp, createTerminalApp, createAppManagerApp,
   createEditApp, createAboutApp,
-} from '../src/drapog.apps.js';
-import { DrapSYS } from '../src/drapog.sys.js';
-import { drapAppBridge } from '../src/drapog.launcher.js';
-import { AppRegistry } from '../src/drapog.registry.js';
+} from '../../src/drapog.apps.js';
+import { DrapSYS } from '../../src/drapog.sys.js';
+import { drapAppBridge } from '../../src/drapog.launcher.js';
+import { AppRegistry } from '../../src/drapog.registry.js';
 
 // 是否移动端（与 BIOS 菜单同一判据）
 function isMobileDevice() {

@@ -17,7 +17,7 @@ import {
 
 /**
  * 打开 BIOS Setup。resolve(保存后的设置 | null)。调用方负责 resolve 后回到启动菜单。
- * @param {import('../../drapog.vfs.js').VFS} vfs 用于读写项目设置文件
+ * @param {import('../../src/drapog.vfs.js').VFS} vfs 用于读写项目设置文件
  */
 export function showSetup(vfs) {
   return new Promise(resolve => {

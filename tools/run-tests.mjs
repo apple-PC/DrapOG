@@ -13,6 +13,13 @@ const files = readdirSync(testsDir)
 
 let pass = 0, fail = 0;
 const failed = [];
+
+// 先做静态 import 解析校验（单测 mock 引擎、不加载 Boot 入口，此步补盲区）
+const pre = spawnSync('node', [resolve(ROOT, 'tools/check-imports.mjs')], { cwd: ROOT, encoding: 'utf8' });
+console.log(pre.stdout.trim());
+if (pre.status !== 0) { console.log('import 校验失败，中止测试'); process.exit(1); }
+console.log('');
+
 for (const f of files) {
   const r = spawnSync('node', [resolve(testsDir, f)], { cwd: ROOT, encoding: 'utf8' });
   if (r.status === 0) {
