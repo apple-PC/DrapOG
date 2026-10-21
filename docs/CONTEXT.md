@@ -918,3 +918,10 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   - 检查：`inspectLocals()`（按 FP+offset 读当前栈帧局部变量，`_valueToString` 区分 int/str 指针）、`listSource()`（断点 `●` + 当前行 `→` 上下文）、`print()`（支持 `r0..r7` 与局部变量名）、`registers()`、`currentFunction()`（取 callStack 顶）。
 - **CLI**（`tools/drapdebug.mjs`）：交互式 REPL（readline，支持管道输入），命令 `b/break del/clear r/run c/cont s/step l/list p/print info regs bt/q`。注入极简 `DrapSYS` 宿主（console 输出 + 内存 VFS）使带系统调用的真实程序也能调试。
 - 验证：新增 `tests/test_drapdebug.mjs`（7 组 26 项）全绿，含循环断点多次命中（sum 0→1→3、i 0→1→2、t 1→2→3、返回值 6）、嵌套函数调用栈与帧内局部变量（add 帧 a=3,b=4,r=7）；全套 30 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
+
+### 工程化-M4：DrapLD 链接器 + .dbyte 运行器（已推送）
+- **动机**：现有 module 机制是「编译期内联」（`DrapCC(source,{modules})` 把模块源码并入一起编译），尚无独立链接步骤；且 `.dbyte` 格式在仓库内**无加载入口**（dead format）。M4 让 `.dbyte` 成为真正可分发格式：把多模块源链接成单一 `.dbyte`，并提供加载运行器。
+- **关键发现（修复前）**：`.dbyte` 的 `pack` 把 LABEL 全部压成扁平下标、`unpack` 不再还原 LABEL，`_label()` 已支持 `@N` 数字下标（`name.startsWith('@')` → 返回该整数作 PC），故带 CALL/JMP 的程序 unpack 后可直接被 VM 运行——格式本身可执行，缺的是加载入口。实测 `编译→pack→unpack→VM` 闭环（add(square(3),square(4))=25）通过。
+- **链接器 `tools/drapld.mjs`**：`node tools/drapld.mjs main.drap -m utils.drap -m helper=./h.drap -o out.dbyte`。读取主程序 + 各模块源（模块名默认取文件名 stem，或 `name=path` 显式指定），复用 `DrapCC` 的 files 级 import 机制编译成单一 program，再 `pack` 成 `.dbyte`（带 debug 段）。是面向分发的「链接」步骤。
+- **运行器 `tools/run_dbyte.mjs`**：加载 `.dbyte`（`unpack` 校验），挂载极简 `DrapSYS`（stdout 输出 + 内存 VFS），运行并打印程序输出与退出码。**坑（已修）**：`term_print` 的 `onOutput` 传的是「累计全串」（宿主应幂等替换），运行器初版每次 `write(s)` 全量写出导致输出重复（如 "2525 done"）；改为只写相对上次新增的增量后正常（"25 done"）。
+- 验证：新增 `tests/test_drapld.mjs`（5 组）全绿，覆盖 `.dbyte` 往返运行行为与内存一致、嵌套模块 import 链接运行（mid=leaf+10=17）、CLI 端到端（drapld 产文件 + run_dbyte 运行）、缺失模块引用编译期报错；全套 31 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
