@@ -65,7 +65,9 @@ async function testSettings() {
   await settle();
   const t0 = st.drawOps.filter(o => o.op === 'text').map(o => o.text);
   ok(st.drawOps.length > 0, 'Settings 首帧已绘制');
-  ok(t0.some(x => /个性化/.test(x)), 'Settings 侧栏含「个性化」');
+  ok(t0.some(x => /外观/.test(x)), 'Settings 侧栏含「外观」');
+  ok(t0.some(x => x === 'Wi-Fi'), 'Settings 侧栏含「Wi-Fi」（macOS 风格分类）');
+  ok(t0.some(x => /系统主题/.test(x)), '默认落在「外观」页并显示「系统主题」设置项');
   // 切换主题
   sys.injectWinEvent(win.id, 'click macos'); await settle();
   ok(wm.theme === 'macos', '点击 macOS 触发 setTheme(macos)');

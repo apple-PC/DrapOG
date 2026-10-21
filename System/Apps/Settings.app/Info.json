@@ -3,8 +3,8 @@
   "name": "设置",
   "type": "gui",
   "entry": "main.drapp",
-  "version": "1.0",
+  "version": "1.1",
   "author": "DrapOG",
-  "description": "系统设置（DrapLang 自举版：主题切换、软键盘开关）",
+  "description": "系统设置（macOS 风格侧栏；主题项归入「外观」模块）",
   "category": "system"
 }

@@ -832,6 +832,11 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   - 底色由 `rgba(0,0,0,0.35)` 调为 `rgba(15,15,20,0.45)`。
 - 验证：新增 test_wm.mjs 24 项全绿（8 方向缩放/最小尺寸钳制/菜单栏与屏幕边界钳制/最大化禁缩放/光标反馈/拖动+吸附回归/菜单栏布局与渲染冒烟）；全套 27 个测试文件回归无回归。
 
+### L9：设置应用 macOS 风格改版（项目 2.3.1）
+- **Settings.app 重写**（`System/Apps/Settings.app/main.drapp`，窗口 560×440）：侧栏仿 macOS 系统设置——10 个分类（Wi-Fi/蓝牙/网络/电池/通用/外观/显示器/桌面与程序坞/账户/关于），每项彩色图标块（`win_set_color` 色板数组）+ emoji 图标 + 名称，选中项用 `win_theme(4)` 高亮条；侧栏点击按 `(y-12)/30` 整除映射分类，越界钳制。
+- **主题项统一归入「外观」**：原「个性化」分类撤销，系统主题切换（macos/windows 按钮 + `win_set_theme`）移入「外观」页；「通用」保留软键盘开关（`win_set_softkeyboard`）；内容区带卡片描边（`win_stroke_rect` + `win_theme(3)`）与副标题说明；未实现分类显示「此设置项暂未开放」占位；默认落在「外观」页。
+- 验证：test_drapps.mjs 增至 15 项全绿（侧栏含「外观」「Wi-Fi」、默认显示「系统主题」、主题切换/软键盘回归）；全套 13 个测试文件回归无回归。
+
 ### 关键修复（L3/L4 期间）
 - registry 导入路径 `./launcher.js` → `./drapog.launcher.js`（原先会 `ERR_MODULE_NOT_FOUND`）。
 - cmd.js 顶层 `await registry.scan(...)` 置于非 async 流程导致 `SyntaxError` → 改 fire-and-forget `registry.scan(...).catch(()=>{})`。
@@ -845,4 +850,4 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 全套 26 个测试文件（含 l6/l7/sdk 等）全绿，无回归。
 
 ---
-最后更新：2026-10-21　当前版本：2.3.0
+最后更新：2026-10-21　当前版本：2.3.1
