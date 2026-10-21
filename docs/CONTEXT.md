@@ -862,5 +862,21 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 未动：P0-1 位宽（按 `DECISION-位宽.md` 搁置）、P2-2 BIOS DPR（用户未选）、P1-2 文档不符（按交接清单先报告不擅改）。
 - 验证：全套 27 个测试文件（`npm test`）全绿，无回归。
 
+### L10.1：入口 import 深度回归修复 + 静态 import 校验（项目 2.3.2，已推送）
+- **触发**：L10 整理后 GitHub Pages 线上白屏，控制台报 `Failed to fetch dynamically imported module`（两张截图确认）。根因：`System/Boot/gui.js`/`cmd.js` 引擎 import 在 L10 改写时写成 `'../src/'`，而 Boot 层相对仓库根需 `'../../src/'`（少一层），导致线上 404；单测盲区（27 个测试全 mock 引擎、从不加载 `Boot/gui.js`/`cmd.js` 入口）使该错误漏过全绿回归。
+- **修复**：`System/Boot/gui.js`、`System/Boot/cmd.js` 各 7 处 `'../src/'` → `'../../src/'`；`System/BIOS/setup.js` JSDoc `@param {import('../../drapog.vfs.js')...}` 漏改处一并修正。
+- **新增 `tools/check-imports.mjs`**：扫描全仓 `.js/.mjs`（排除 `node_modules/.workbuddy/.git/Users`）的静态 `from`、动态 `import()`、副作用 import 相对引用，校验目标文件存在；共校验 132 处。`tools/run-tests.mjs` 第一步即跑该静态校验（失败即中止），补上入口层的回归盲区。
+- 验证：27/27 测试全绿 + import 校验 132 处通过。
+
+### 推送工作流（git 协议被封，改走 GitHub API）
+- **网络事实**：本机代理按主机名放行——`github.com`（git 协议走它）返回 000（`CONNECT tunnel failed, response 502`，被封死）；`api.github.com` 返回 200，可达。故 `git push`/`git fetch` 全部失败，`git fetch origin` 报 `Empty reply from server`。
+- **绕过方案**：`tools/push_api.mjs`（PAT 走 `GITHUB_TOKEN` 环境变量，切勿硬编码入仓）用 GitHub Git Data API（`POST /git/blobs`→`/git/trees`→`/git/commits`→`PATCH /git/refs/heads/main`）合成干净 commit。设计要点：
+  - 以 API 实时查询到的远程 main 真实 **tree** 为权威基准（本地 `origin/main` 因 `git fetch` 失败而陈旧）。
+  - 安全校验：本地 `origin/main` 的 tree 必须与远程 tree 一致，否则中止（防远程被意外推进导致非快进覆盖）。
+  - 推送成功后自动 `git update-ref refs/remotes/origin/main HEAD`，使本地 `origin/main` 与远程同步（其 tree 相同，仅 commit SHA 不同），保证后续 `git diff origin/main` 基准正确。
+  - 推荐工作流：先本地 `git commit`（确保 HEAD 含本次改动），再 `GITHUB_TOKEN=xxx DOIT=1 node tools/push_api.mjs`。
+- **已推送记录**：L10.1 经 API 推成 `bf053a0`（parent `7355c65`）；推送工具本身随后推成 `88ad9ab`（parent `bf053a0`）。作废了基于 git 协议、定在 21:50 的「重试推送」一次性 automation（注定失败）。
+- 注：PAT（`ghp_…`）按用户规则保留至整个项目完成后统一注销。
+
 ---
 最后更新：2026-10-21　当前版本：2.3.2
