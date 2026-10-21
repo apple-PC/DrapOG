@@ -237,6 +237,17 @@ class Scope {
   localCount() { return -this.nextLocal - 1; }
 }
 
+// 展开作用域链（含嵌套块）收集全部局部变量名→栈槽 offset（offset 相对 FP，为负）+ 类型
+function flattenScope(root) {
+  const out = [];
+  let s = root;
+  while (s) {
+    for (const [name, info] of s.vars) out.push({ name, offset: info.offset, type: info.type || null });
+    s = s.parent;
+  }
+  return out;
+}
+
 export class DrapCC {
   constructor(source, options = {}) {
     this.source = source;
@@ -260,6 +271,7 @@ export class DrapCC {
     this.fileImports = [];
     this.curLine = 0;        // 当前代码生成对应的源码行（用于运行期错误诊断）
     this._stmtLine = 0;      // 当前语句起始行（解析阶段填充到节点 .line）
+    this._fnLocals = {};     // 调试：函数名 → [{name, offset}]（局部变量栈槽）
   }
 
   compile() {
@@ -326,6 +338,7 @@ export class DrapCC {
       functions.sort((a, b) => a.start - b.start);
       for (let i = 0; i < functions.length; i++) {
         functions[i].end = (i + 1 < functions.length ? functions[i + 1].start : f) - 1;
+        functions[i].locals = this._fnLocals[functions[i].name] || [];
       }
       result.debug = { source: this.source, functions };
     }
@@ -872,7 +885,8 @@ export class DrapCC {
 
   genFn(fn) {
     this.curFn = fn;
-    this.curScope = new Scope(null);
+    const rootScope = new Scope(null);
+    this.curScope = rootScope;
     this.loopStack = [];
 
     fn.params.forEach((p, i) => this.curScope.defineParam(p.name, p.type, 2 + i));
@@ -888,12 +902,16 @@ export class DrapCC {
     this.emit('LI', ['r0', '0']);
     this.emit('LEAVE', []);
     this.emit('RET', []);
+
+    // 调试：记录本函数全部局部变量（含块级）的栈槽 offset，供调试器 print
+    this._fnLocals[fn.name] = flattenScope(rootScope);
   }
 
   /* ==================== event fn 合成 main 事件循环 ==================== */
   genEventMain() {
     this.curFn = { name: 'main', params: [], retType: { kind: 'prim', name: 'i32' } };
-    this.curScope = new Scope(null);
+    const rootScope = new Scope(null);
+    this.curScope = rootScope;
     this.loopStack = [];
     this.insideEventHandler = false;
 
@@ -974,6 +992,9 @@ export class DrapCC {
     this.emit('LI', ['r0', '0']);
     this.emit('LEAVE', []);
     this.emit('RET', []);
+
+    // 调试：记录合成 main 的全部局部变量（含事件处理器内变量）栈槽
+    this._fnLocals['main'] = flattenScope(rootScope);
   }
 
   scanLocals(stmts, scope) {

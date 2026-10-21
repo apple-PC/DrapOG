@@ -908,3 +908,13 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **兼容性坑（已踩）**：首次实现把 `start()` 写成 `async`，导致 `await this.start()` 让 `run()` 在任何指令执行前挂起，破坏 GUI 宿主「fire-and-forget `vm.run()`」的同步前缀约定，`test_docedit`/`test_drapps` 报 `win` 为 null。改回同步 `start()` 后两测试恢复全绿。
 - 验证：新增 `tests/test_vmdebug.mjs`（13 项）全绿；全套 29 个测试文件（`npm test`）全绿，无回归。
 - 注：VM 的 `pc` 是「含 LABEL」的下标（LABEL 作为 no-op 指令占据位置），调试器行→pc 映射直接扫 `instructions[i].line` 即可，与实际执行一致。
+
+### 工程化-M3：DrapDebug CLI 调试器（已推送）
+- **动机**：M1（编译期 debug 信息）+ M2（VM 单步/断点）落地后，缺一个「能用」的前端。M3 提供无界面核心 `src/drapdebug.js` + CLI `tools/drapdebug.mjs`，让任何 DrapLang 程序可被行级调试。
+- **实现**（`src/drapdebug.js`）：
+  - 构造时编译（`debug:true`）并建索引：`lineToPcs`（源码行→真实指令 pc 列表）、`fnLocals`（函数名→局部变量 `{name,offset,type}`）、`sourceLines`。
+  - **行断点只落在该行首个真实指令 pc**（关键修正：最初给整行每条指令都打点，导致 `cont` 跨过一个 pc 又被同行下一个 pc 拦住、循环不前进；改为 `Math.min(...pcs)` 单一落点）。
+  - 执行控制：`run()`（首跑）、`cont()`（从断点继续，跳过当前 pc 一次）、`step()`（单步一条真实指令，step-into）。调试器维护 `this.status`（loaded→paused→running→halted）门控——**最初漏初始化 `status` 导致 `cont()` 因 `status!=='paused'` 直接 no-op、断点不二次命中**；新增 `_syncStatus()` 在每次执行控制后按 VM 实态同步。
+  - 检查：`inspectLocals()`（按 FP+offset 读当前栈帧局部变量，`_valueToString` 区分 int/str 指针）、`listSource()`（断点 `●` + 当前行 `→` 上下文）、`print()`（支持 `r0..r7` 与局部变量名）、`registers()`、`currentFunction()`（取 callStack 顶）。
+- **CLI**（`tools/drapdebug.mjs`）：交互式 REPL（readline，支持管道输入），命令 `b/break del/clear r/run c/cont s/step l/list p/print info regs bt/q`。注入极简 `DrapSYS` 宿主（console 输出 + 内存 VFS）使带系统调用的真实程序也能调试。
+- 验证：新增 `tests/test_drapdebug.mjs`（7 组 26 项）全绿，含循环断点多次命中（sum 0→1→3、i 0→1→2、t 1→2→3、返回值 6）、嵌套函数调用栈与帧内局部变量（add 帧 a=3,b=4,r=7）；全套 30 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
