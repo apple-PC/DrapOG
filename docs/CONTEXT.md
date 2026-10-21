@@ -879,7 +879,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 注：PAT（`ghp_…`）按用户规则保留至整个项目完成后统一注销。
 
 ---
-最后更新：2026-10-21　当前版本：2.4.0（工程化阶段启动）
+最后更新：2026-10-21　当前版本：2.4.1（工程化-M5 优化器）
 
 ### 四阶段整理目标（用户确认开工）
 用户「开始这四个阶段」，经策略确认**工程化优先**（F 系列）。四阶段锚定（基于真实代码状态，非原构思空想）：
@@ -925,3 +925,16 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **链接器 `tools/drapld.mjs`**：`node tools/drapld.mjs main.drap -m utils.drap -m helper=./h.drap -o out.dbyte`。读取主程序 + 各模块源（模块名默认取文件名 stem，或 `name=path` 显式指定），复用 `DrapCC` 的 files 级 import 机制编译成单一 program，再 `pack` 成 `.dbyte`（带 debug 段）。是面向分发的「链接」步骤。
 - **运行器 `tools/run_dbyte.mjs`**：加载 `.dbyte`（`unpack` 校验），挂载极简 `DrapSYS`（stdout 输出 + 内存 VFS），运行并打印程序输出与退出码。**坑（已修）**：`term_print` 的 `onOutput` 传的是「累计全串」（宿主应幂等替换），运行器初版每次 `write(s)` 全量写出导致输出重复（如 "2525 done"）；改为只写相对上次新增的增量后正常（"25 done"）。
 - 验证：新增 `tests/test_drapld.mjs`（5 组）全绿，覆盖 `.dbyte` 往返运行行为与内存一致、嵌套模块 import 链接运行（mid=leaf+10=17）、CLI 端到端（drapld 产文件 + run_dbyte 运行）、缺失模块引用编译期报错；全套 31 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
+
+### 工程化-M5：优化器（常量折叠 + 死代码消除，已提交待推送）
+- **动机**：编译器当前是「栈式求值 + 朴素代码生成」（`LI r0,c; PUSH r0; ...; POP r0; ALU` 模式，常量被压到操作数栈），产物里有明显可优化空间（常量算术、被立即覆盖的死 `LI`）。M5 提供一个**纯 IR 变换**优化器，不改 VM、不改变程序可观察行为——为后续「工程化收口 + 发布」提供体积/性能优化的地基，并验证「优化前后运行输出逐字节一致」这一硬约束。
+- **实现**（`src/drapopt.js`，新文件；导出 `foldConstants/eliminateDeadLoads/optimize/stats`）：
+  - **常量折叠 `foldConstants`**：栈感知的全局常量传播。除寄存器 `known{r0..r7}` 外，额外维护与运行时操作数栈平行的 `constStack[]`（元素为常量值或 null 未知），因为编译器把常量压栈参与 ALU。处理的指令：`LI`（记 known）、`MOV`（搬运已知值）、`PUSH`（压栈）、`POP`（出栈回填 known）、`ADD/SUB/.../NE`（操作数均已知则就地折叠成 `LI`，值经 `fold()` 求值）、`CALL/SYSCALL`（保守清空 known + constStack，避免经 ABI 误折叠）。`fold()` 语义与 VM 一致：`ADD/SUB` 普通算术、`MUL` 用 `Math.imul`（溢出语义）、`DIV/MOD` 除数为 0 返回 null 不折叠（保留运行期语义）、比较返回 0/1。
+  - **死代码消除 `eliminateDeadLoads`**：移除「在首次被读取前即被覆盖」的 `LI`（前向扫描，遇该 reg 被读则 live，被覆盖则死，遇 LABEL/不相关指令则继续）。`readsReg/writesReg` 对 `CALL/SYSCALL/RET/HLT/PRINT*` 保守视为读写全部 r0..r7（宁可少删）。
+  - **组合 `optimize`**：`foldConstants → eliminateDeadLoads → eliminateDeadLoads`（消除后可能暴露新的连续死 LI，故二次扫描）。
+  - **CLI `tools/drapopt.mjs`**：`node tools/drapopt.mjs src.drap [-o out.dbyte]`，编译并施加 `optimize`，报告优化前后指令数，可选导出 `.dbyte`。
+- **三个 bug（已修，均为语义保持类）**：
+  1. 初版留了一个从未被调用的 `FOLDABLE` 占位对象，清理掉，改为真正靠 `fold()` 求值。
+  2. `fold()` 的 `ADD` 误用 `Math.imul`（导致 `2+3` 被算成 6）；修正为 `a + b`（仅 `MUL` 用 `Math.imul`，与 VM 一致）。
+  3. `writesReg` 对 `LOADL offset, rX` 取错参数（原取 `args[0]` 即 offset），导致 `known[r0]` 未被清除、栈模型残留 stale 值，污染后续 `c=a+b`（算成 8 而非 15）；修正为 `case 'LOADL': add(args[1])`。定位时临时用 `DBGOPT=1` 调试日志，已移除。
+- **验证**：新增 `tests/test_opt.mjs`（6 用例）全绿：① 语义保持（优化前后 `term_print` 输出逐字节一致）；② `.dbyte` 往返 + 优化运行一致；③ 优化幂等（再跑一次无变化）；④ 含 `CALL` 的程序安全（CALL 后常量未知不被误折叠）；⑤ 死 LI 消除（被覆盖的 `LI r0` 被删）；⑥ 含 `LOADL` 局部变量的程序正确（`c=a+b`=15）。全套 32 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。指令数未显著下降属预期：编译器栈式求值需 PUSH/POP 维持栈平衡，死常量不能随意删，优化器采取保守安全策略。
