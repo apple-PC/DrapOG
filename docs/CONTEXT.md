@@ -879,4 +879,20 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 注：PAT（`ghp_…`）按用户规则保留至整个项目完成后统一注销。
 
 ---
-最后更新：2026-10-21　当前版本：2.3.2
+最后更新：2026-10-21　当前版本：2.4.0（工程化阶段启动）
+
+### 四阶段整理目标（用户确认开工）
+用户「开始这四个阶段」，经策略确认**工程化优先**（F 系列）。四阶段锚定（基于真实代码状态，非原构思空想）：
+- **阶段一 · 内核语言补强**：标准库分层、编译器诊断、类型/字符串补强（STRCMP 等）、系统调用收口。
+- **阶段二 · 办公应用深化**：DocEdit 做厚（打开/保存/选择/撤销）、Calc 可用表格、Finder 导航、应用 DrapLang 化。
+- **阶段三 · GUI 体验**：WM 主题 token 化收口、Windows 11 主题、窗口/菜单栏/Dock 打磨。
+- **阶段四 · 工程化（当前）**：DrapLD 链接器、DrapDebug 调试器、优化器、构建/发布强化。
+工程化优先理由：调试器/链接器/优化器是「杠杆最高」的地基——所有语言/应用/GUI 都用 DrapLang 写，工具先行能让后续三阶段少返工。工程化拆为 6 个里程碑 M1–M6（见任务列表）。
+
+### 工程化-M1：DBYTE 可选调试信息段（向后兼容，已推送）
+- **动机**：`.dbyte` 格式当前在仓库内**无任何调用**（运行时是 `.drapp`→`DrapCC`→`{instructions,strings}` 内存直跑，不经序列化）。但文档要求「无损往返」硬约束，且调试器（M3）需要源码行/函数符号。故 M1 同时做两路：
+  - **编译期（主交付）**：`drapcc.js` 的 `compile({debug:true})` 在返回里附加 `debug = { source, functions:[{name,start,end}] }`；每条指令本就由 `emit()` 打了 `.line`（VM `run()` 已读 `ins.line`）。默认编译不附加，**产物字节零变化**。
+  - **序列化（DBYTE 段）**：`drapog.dbyte.js` 新增 `DEBUG_MAGIC('DBG0')` 调试段，接在字符串段之后（`pack` 仅在 `program.debug` 时追加并整体重算 FNV 校验；`unpack` 尾部见 `DBG0` 则解析并回填 `ins.line`）。段布局：魔数+segVersion+行号表(扁平指令下标→u16 行)+函数表(name/start/end)+源码行表。
+- **向后兼容（已验证）**：旧 loader 只读 `instrCount`+`stringCount` 指令/字符串，**天然忽略尾部**；校验码覆盖 `[24,len-24]` 全文件（含调试段），故旧 loader 加载带段 `.dbyte` 也不报 checksum 错误。M1 测试明确断言：带段文件的「头部 [0,20)」与「指令/字符串区 [24,len)」字节与无段版**逐字节相同**，仅 4 字节校验码因覆盖尾部而更新。
+- **无损往返（已验证）**：默认 `pack` 路径字节完全不变；带段 `pack→unpack` 行号全部回填一致、source/函数一致。
+- 验证：新增 `tests/test_dbyte.mjs`（20 项）全绿；全套 28 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。

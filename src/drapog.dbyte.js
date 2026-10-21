@@ -10,6 +10,100 @@ export const VERSION = 0x0102;
 export const HEADER_SIZE = 24;
 export const INSTR_SIZE = 8;
 
+// 可选调试段魔数（'DBG0'）。接在字符串段之后；旧加载器只读 instrCount+stringCount，
+// 天然忽略尾部，因此带调试段的 .dbyte 也能被旧版 loader 安全加载（仅丢弃调试信息）。
+export const DEBUG_MAGIC = 0x44424730;
+
+/* ==================== 调试信息段（可选，向后兼容） ====================
+ * 段布局（小端）：
+ *   [0..3]  DEBUG_MAGIC ('DBG0')
+ *   [4..5]  segVersion (u16)
+ *   [6..9]  lineMapCount N (u32)
+ *   N×2     每个扁平指令的源码行号 u16（数组下标即扁平指令下标）
+ *   4       函数数 F (u32)
+ *   每函数: nameLen u16 + name(utf8) + start u32 + end u32
+ *   4       源码行数 L (u32)
+ *   每行:   lineLen u16 + line(utf8)
+ */
+function buildDebugSegment(flatLine, functions, source) {
+  const enc = new TextEncoder();
+  const parts = [];
+
+  const header = new Uint8Array(10);
+  const hdv = new DataView(header.buffer);
+  hdv.setUint32(0, DEBUG_MAGIC, true);
+  hdv.setUint16(4, 1, true);                  // segVersion
+  hdv.setUint32(6, flatLine.length, true);     // lineMapCount
+  parts.push(header);
+
+  const lm = new Uint8Array(flatLine.length * 2);
+  const lmdv = new DataView(lm.buffer);
+  for (let i = 0; i < flatLine.length; i++) lmdv.setUint16(i * 2, (flatLine[i].line | 0) & 0xFFFF, true);
+  parts.push(lm);
+
+  const fnHeader = new Uint8Array(4);
+  new DataView(fnHeader.buffer).setUint32(0, functions.length, true);
+  parts.push(fnHeader);
+  for (const f of functions) {
+    const nb = enc.encode(String(f.name));
+    const fh = new Uint8Array(2 + nb.length + 8);
+    const fhdv = new DataView(fh.buffer);
+    fhdv.setUint16(0, nb.length, true);
+    fh.set(nb, 2);
+    fhdv.setUint32(2 + nb.length, f.start >>> 0, true);
+    fhdv.setUint32(2 + nb.length + 4, f.end >>> 0, true);
+    parts.push(fh);
+  }
+
+  const srcLines = String(source).split('\n');
+  const srcHeader = new Uint8Array(4);
+  new DataView(srcHeader.buffer).setUint32(0, srcLines.length, true);
+  parts.push(srcHeader);
+  for (const line of srcLines) {
+    const lb = enc.encode(line);
+    const lh = new Uint8Array(2 + lb.length);
+    const lhdv = new DataView(lh.buffer);
+    lhdv.setUint16(0, lb.length, true);
+    lh.set(lb, 2);
+    parts.push(lh);
+  }
+
+  const total = parts.reduce((s, p) => s + p.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+function parseDebugSegment(bytes, offset) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (dv.getUint32(offset, true) !== DEBUG_MAGIC) return null;
+  const segVersion = dv.getUint16(offset + 4, true);
+  if (segVersion !== 1) return null;
+  const N = dv.getUint32(offset + 6, true);
+  let p = offset + 10;
+  const lineMap = new Array(N);
+  for (let i = 0; i < N; i++) lineMap[i] = { line: dv.getUint16(p + i * 2, true), col: 0 };
+  p += N * 2;
+  const F = dv.getUint32(p, true); p += 4;
+  const dec = new TextDecoder();
+  const functions = [];
+  for (let i = 0; i < F; i++) {
+    const nl = dv.getUint16(p, true); p += 2;
+    const name = dec.decode(bytes.subarray(p, p + nl)); p += nl;
+    const start = dv.getUint32(p, true); p += 4;
+    const end = dv.getUint32(p, true); p += 4;
+    functions.push({ name, start, end });
+  }
+  const L = dv.getUint32(p, true); p += 4;
+  const srcLines = [];
+  for (let i = 0; i < L; i++) {
+    const ll = dv.getUint16(p, true); p += 2;
+    srcLines.push(dec.decode(bytes.subarray(p, p + ll))); p += ll;
+  }
+  return { lineMap, functions, source: srcLines.join('\n') };
+}
+
 export const OPCODE = {
   LABEL: 0,
   LI: 1, MOV: 2,
@@ -95,9 +189,10 @@ export function pack(program) {
 
   const labelToIndex = new Map();
   const flat = [];
+  const flatLine = [];
   for (const ins of instructions) {
     if (ins.op === 'LABEL') labelToIndex.set(ins.args[0], flat.length);
-    else flat.push(ins);
+    else { flat.push(ins); flatLine.push({ line: (ins.line || 0) | 0, col: 0 }); }
   }
   const entry = labelToIndex.get('main') ?? 0;
 
@@ -142,6 +237,23 @@ export function pack(program) {
   const h1 = fnv1a(out, 0, 20);
   const h2 = fnv1a(out, 24, total - 24, h1);
   dv.setUint32(20, h2, true);
+
+  // 可选调试段：仅在 program.debug 存在时追加。默认（无 debug）路径字节完全不变，
+  // 满足无损往返硬约束；校验码在追加后整体重算，旧版 loader 读带段 .dbyte 也会忽略尾部。
+  if (program.debug) {
+    const debugBytes = buildDebugSegment(
+      flatLine,
+      program.debug.functions || [],
+      program.debug.source || ''
+    );
+    const combined = new Uint8Array(out.length + debugBytes.length);
+    combined.set(out, 0);
+    combined.set(debugBytes, out.length);
+    const c1 = fnv1a(combined, 0, 20);
+    const c2 = fnv1a(combined, 24, combined.length - 24, c1);
+    new DataView(combined.buffer).setUint32(20, c2, true);
+    return combined;
+  }
 
   return out;
 }
@@ -188,7 +300,23 @@ export function unpack(bytes) {
     p += len;
   }
 
-  return { instructions, strings, entry, version };
+  // 可选调试段：尾部若有 DBG0 魔数则解析并回填指令行号；旧文件无尾部 → debug=null
+  let debug = null;
+  if (p < bytes.length) {
+    const seg = parseDebugSegment(bytes, p);
+    if (seg) {
+      debug = { functions: seg.functions, source: seg.source };
+      const n = Math.min(instructions.length, seg.lineMap.length);
+      for (let i = 0; i < n; i++) {
+        if (seg.lineMap[i]) {
+          instructions[i].line = seg.lineMap[i].line;
+          instructions[i].col = seg.lineMap[i].col;
+        }
+      }
+    }
+  }
+
+  return { instructions, strings, entry, version, debug };
 }
 
 function encodeArg(spec, arg, labelToIndex) {

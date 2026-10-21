@@ -303,7 +303,34 @@ export class DrapCC {
     for (const d of this.funcs.values()) this.genFn(d);
     if (this.eventHandlers.size > 0) this.genEventMain();
 
-    return { instructions: this.instructions, strings: this.strings };
+    const result = { instructions: this.instructions, strings: this.strings };
+
+    // 调试信息：源码文本 + 函数符号表（扁平指令下标空间）。仅当 options.debug 时附加，
+    // 不影响默认编译产物；每条指令的行号已由 emit() 写入 .line，VM 运行期可直接用。
+    if (this.options.debug) {
+      const arrIdxToFlat = new Array(this.instructions.length);
+      let f = 0;
+      for (let j = 0; j < this.instructions.length; j++) {
+        if (this.instructions[j].op === 'LABEL') arrIdxToFlat[j] = null;
+        else arrIdxToFlat[j] = f++;
+      }
+      const functions = [];
+      for (let j = 0; j < this.instructions.length; j++) {
+        if (this.instructions[j].op === 'LABEL') {
+          let k = j + 1;
+          while (k < this.instructions.length && this.instructions[k].op === 'LABEL') k++;
+          const start = k < this.instructions.length ? arrIdxToFlat[k] : f;
+          functions.push({ name: this.instructions[j].args[0], start, end: -1 });
+        }
+      }
+      functions.sort((a, b) => a.start - b.start);
+      for (let i = 0; i < functions.length; i++) {
+        functions[i].end = (i + 1 < functions.length ? functions[i + 1].start : f) - 1;
+      }
+      result.debug = { source: this.source, functions };
+    }
+
+    return result;
   }
 
   /* ==================== 词法 ==================== */
