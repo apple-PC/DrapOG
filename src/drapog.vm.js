@@ -66,6 +66,13 @@ export class VM {
     this.sys = null;   // DrapSYS 实例（由外部挂载）
     this.maxSteps = 1000000;  // P0-4：1e6 步内掐死无 syscall 的死循环；长驻交互程序（如 Shell）在 _doSyscall 处重置预算，永不撞线
 
+    // 调试支持（M2）：断点（按指令下标 pc）+ 暂停态 + 停止原因
+    this.breakpoints = new Set();
+    this.paused = false;
+    this._skipBpPc = null;    // 恢复时跳过当前 pc 断点一次
+    this._stopReason = null;  // 'breakpoint' | 'step' | null
+    this._stopPc = null;
+
     if (program) this.load(program);
   }
 
@@ -107,6 +114,12 @@ export class VM {
     this.steps = 0;
     this.curLine = 0;        // 当前执行指令对应的源码行（运行期错误诊断）
     this.callStack = [];     // 调用栈（运行期错误诊断）：[{fn, line}]
+    // 调试态复位（每次 load 都清空断点，避免换程序后残留旧 pc 断点）
+    this.breakpoints = new Set();
+    this.paused = false;
+    this._skipBpPc = null;
+    this._stopReason = null;
+    this._stopPc = null;
   }
 
   /* ---------- 堆对象访问（供 DrapSYS 使用） ---------- */
@@ -156,7 +169,10 @@ export class VM {
     return obj.value;
   }
 
-  async run() {
+  // 入口初始化（同步，不执行指令）：定位 main、压虚拟返回地址、建栈底帧。
+  // 必须是同步的——GUI 宿主以「不 await 的 vm.run()」启动，依赖入口初始化在首个 await 前同步完成
+  // （首个 win_create 在事件循环首个 win_get_event 之前），从而先把窗口建好。
+  start() {
     if (this.entryPC !== undefined) this.pc = this.entryPC;
     else if (this.labels['main'] !== undefined) this.pc = this.labels['main'];
     else throw new Error('VM: 未找到 main');
@@ -169,12 +185,28 @@ export class VM {
     // 运行期错误诊断：栈底帧 + 行号跟踪
     this.callStack = [{ fn: 'main', line: 0 }];
     this.curLine = 0;
+  }
 
+  async run() {
+    this.start();
+    await this._continue();
+  }
+
+  // 执行循环（带断点/暂停检查）。run() 与 resume() 共用；无断点时行为与旧 run() 完全一致。
+  async _continue() {
+    this.paused = false;
     while (!this.halted && this.pc < this.instructions.length) {
+      if (this.paused) return;   // 被外部暂停（如 step）
       if (++this.steps > this.maxSteps) throw this._augment(new Error('VM: 步数超限'));
       const ins = this.instructions[this.pc];
       if (ins.line) this.curLine = ins.line;   // 跟踪当前源码行
       if (ins.op === 'LABEL') { this.pc++; continue; }
+
+      // 断点：到达断点 pc 时暂停（恢复时跳过当前 pc 一次，避免立即重触发）
+      if (this.breakpoints.has(this.pc)) {
+        if (this._skipBpPc === this.pc) this._skipBpPc = null;
+        else { this.paused = true; this._stopReason = 'breakpoint'; this._stopPc = this.pc; return; }
+      }
 
       if (ins.op === 'SYSCALL') {
         try { await this._doSyscall(ins); }
@@ -185,6 +217,49 @@ export class VM {
       try { this.execute(ins); }
       catch (e) { throw this._augment(e); }
     }
+  }
+
+  // 从当前暂停点继续运行，直到下一断点或停机（跳过当前 pc 断点一次）
+  async resume() {
+    this._skipBpPc = this.pc;
+    await this._continue();
+  }
+
+  // 单步：执行一条「真实」指令（跳过 LABEL），随后暂停。step-into 语义（CALL 进入被调函数）。
+  async step() {
+    if (this.halted) return;
+    this.paused = false;
+    while (this.pc < this.instructions.length) {
+      const ins = this.instructions[this.pc];
+      if (ins.line) this.curLine = ins.line;
+      if (ins.op === 'LABEL') { this.pc++; continue; }
+      if (this.halted) return;
+      if (ins.op === 'SYSCALL') { await this._doSyscall(ins); break; }
+      try { this.execute(ins); }
+      catch (e) { throw this._augment(e); }
+      break;
+    }
+    this.paused = true;
+    this._stopReason = 'step';
+  }
+
+  setBreakpoint(pc) { this.breakpoints.add(pc); }
+  clearBreakpoint(pc) { this.breakpoints.delete(pc); }
+  clearBreakpoints() { this.breakpoints.clear(); }
+
+  // 调试快照（返回值拷贝，供调试器 inspect，不暴露内部可变引用）
+  snapshot() {
+    return {
+      pc: this.pc,
+      regs: this.regs.slice(),
+      curLine: this.curLine,
+      halted: this.halted,
+      paused: this.paused,
+      stopReason: this._stopReason,
+      stopPc: this._stopPc,
+      callStack: this.callStack.map(f => ({ ...f })),
+      breakpoints: [...this.breakpoints],
+    };
   }
 
   // 把运行期错误包装为带「源码行 + 简调用栈」的诊断信息

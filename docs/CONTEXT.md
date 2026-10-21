@@ -896,3 +896,15 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **向后兼容（已验证）**：旧 loader 只读 `instrCount`+`stringCount` 指令/字符串，**天然忽略尾部**；校验码覆盖 `[24,len-24]` 全文件（含调试段），故旧 loader 加载带段 `.dbyte` 也不报 checksum 错误。M1 测试明确断言：带段文件的「头部 [0,20)」与「指令/字符串区 [24,len)」字节与无段版**逐字节相同**，仅 4 字节校验码因覆盖尾部而更新。
 - **无损往返（已验证）**：默认 `pack` 路径字节完全不变；带段 `pack→unpack` 行号全部回填一致、source/函数一致。
 - 验证：新增 `tests/test_dbyte.mjs`（20 项）全绿；全套 28 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
+
+### 工程化-M2：VM 单步/断点支持（可恢复执行，已推送）
+- **动机**：M3 调试器需要「暂停/继续/单步 + 可读寄存器/栈/PC」。VM 执行循环是 `run()` 一次性跑完，需加断点与单步且**不影响默认行为**。
+- **实现**（`src/drapog.vm.js`）：
+  - 抽出 `start()`（入口初始化：定位 main、压虚拟返回地址 -1、建栈底帧、清 curLine/callStack）——**必须是同步方法**，因为 GUI 宿主以「不 await 的 `vm.run()`」启动并依赖入口初始化在首个 `await`（首个 `win_get_event` 系统调用）前同步完成（首个 `win_create` 在事件循环之前）。
+  - `run()` = `start()` + `await _continue()`（循环体）。`_continue()` 在循环里加断点检查：到达 `breakpoints` 中的 pc 时 `paused=true` 并 `return`（暂停点）；`resume()` 跳过当前 pc 断点一次后继续，避免恢复时立即重触发。
+  - `step()`：执行一条「真实」指令（跳过 LABEL）后暂停，step-into 语义（CALL 进入被调函数）。
+  - 断点管理：`setBreakpoint(pc)/clearBreakpoint(pc)/clearBreakpoints()`；`snapshot()` 暴露 `{pc,regs,curLine,halted,paused,stopReason,stopPc,callStack,breakpoints}` 供调试器 inspect。
+  - 校验码/无损往返不受影响（仅 VM 行为层改动）。
+- **兼容性坑（已踩）**：首次实现把 `start()` 写成 `async`，导致 `await this.start()` 让 `run()` 在任何指令执行前挂起，破坏 GUI 宿主「fire-and-forget `vm.run()`」的同步前缀约定，`test_docedit`/`test_drapps` 报 `win` 为 null。改回同步 `start()` 后两测试恢复全绿。
+- 验证：新增 `tests/test_vmdebug.mjs`（13 项）全绿；全套 29 个测试文件（`npm test`）全绿，无回归。
+- 注：VM 的 `pc` 是「含 LABEL」的下标（LABEL 作为 no-op 指令占据位置），调试器行→pc 映射直接扫 `instructions[i].line` 即可，与实际执行一致。
