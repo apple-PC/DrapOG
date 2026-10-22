@@ -58,6 +58,8 @@ const SYS_TABLE = {
   'win_set_theme':      0x58, // 切换系统主题：win_set_theme("macos"|"windows")
   'win_open_finder':    0x59, // 在 Finder 打开路径：win_open_finder(path)
   'win_set_softkeyboard':0x5a, // 切换软键盘：win_set_softkeyboard(0|1)
+  'win_get_theme':      0x5b, // 读取当前主题：返回 0=macos 1=windows（设置 App 启动高亮用）
+  'win_get_softkeyboard':0x5c, // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
   // 进程参数（CLI 工具读取命令行）
   'args_count': 0x60,
   'args_get':   0x61,
@@ -210,6 +212,8 @@ const SYS_ARGS = {
   'win_set_theme':       1,
   'win_open_finder':     1,
   'win_set_softkeyboard': 1,
+  'win_get_theme':       0,
+  'win_get_softkeyboard': 0,
   'args_count': 0,
   'args_get':   1,
 };

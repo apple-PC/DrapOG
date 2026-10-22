@@ -37,26 +37,27 @@ export async function startGUI(opts = {}) {
       if (r.ok) themeConfigs[t] = await r.json();
     }
   } catch (e) { /* 用 WM 内置默认 */ }
+  // 屏幕初始化（DPR 高清）
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = window.innerWidth;
+  const cssH = window.innerHeight;
+  screen.width  = Math.round(cssW * dpr);
+  screen.height = Math.round(cssH * dpr);
+  screen.style.width  = cssW + 'px';
+  screen.style.height = cssH + 'px';
+  window.SCR_W = cssW;
+  window.SCR_H = cssH;
+
+  const ctx = screen.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // VFS：优先用外部传的，否则新建
+  const vfs = opts.vfs || new VFS();
+
+  const wm = new WindowManager(screen, { theme: opts.theme, themeConfigs });
+  await wm.loadPrefs();   // 应用已保存的主题/软键盘偏好（IndexedDB，刷新后恢复）再建窗口
+
   return new Promise(resolve => {
-    // DPR 高清
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = window.innerWidth;
-    const cssH = window.innerHeight;
-    screen.width  = Math.round(cssW * dpr);
-    screen.height = Math.round(cssH * dpr);
-    screen.style.width  = cssW + 'px';
-    screen.style.height = cssH + 'px';
-    window.SCR_W = cssW;
-    window.SCR_H = cssH;
-
-    const ctx = screen.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // VFS：优先用外部传的，否则新建
-    const vfs = opts.vfs || new VFS();
-
-    const wm = new WindowManager(screen, { theme: opts.theme, themeConfigs });
-
     // 应用注册表（L4：整合 draplang 工具 + 制定 .app 格式）
     const registry = new AppRegistry();
     wm.vfs = vfs;

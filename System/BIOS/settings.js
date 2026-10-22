@@ -12,10 +12,11 @@
  */
 
 import { VFS } from '../../src/drapog.vfs.js';
-import { idbGet } from '../../src/drapog.idb.js';
+import { idbGet, idbSet } from '../../src/drapog.idb.js';
 
 export const SETTINGS_PATH = '/System/Settings/bios.json';
-const IDB_ROOT_KEY = 'rootHandle';   // 记住上次挂载的文件夹（与 shell 一致）
+const IDB_ROOT_KEY = 'rootHandle';     // 记住上次挂载的文件夹（与 shell 一致）
+const IDB_PREFS_KEY = 'bios_prefs';    // BIOS/UI 偏好兜底存储（与 WM 的 'prefs' 区分）
 
 /** 出厂默认（与项目内置 System/Settings/bios.json 保持一致） */
 export const DEFAULT_SETTINGS = {
@@ -24,6 +25,8 @@ export const DEFAULT_SETTINGS = {
   quickPOST: true,       // 快速自检
   bootLogo: true,        // 显示开机 Logo
   secureBoot: false,     // 安全启动
+  theme: 'macos',        // 'macos' | 'windows'（GUI 主题，UI 偏好）
+  softKeyboard: false,   // 移动端软键盘开关（UI 偏好）
 };
 
 const BOOT_MODES = ['auto', 'cmd', 'gui'];
@@ -39,29 +42,40 @@ export function normalizeSettings(s) {
     if (typeof s.quickPOST === 'boolean') out.quickPOST = s.quickPOST;
     if (typeof s.bootLogo === 'boolean') out.bootLogo = s.bootLogo;
     if (typeof s.secureBoot === 'boolean') out.secureBoot = s.secureBoot;
+    if (s.theme === 'macos' || s.theme === 'windows') out.theme = s.theme;
+    if (typeof s.softKeyboard === 'boolean') out.softKeyboard = s.softKeyboard;
   }
   return out;
 }
 
-/** 从项目文件读取设置（经 VFS）；缺失/损坏 → 默认 */
+/** 从项目文件读取设置（经 VFS）；缺失/损坏 → 回退 IndexedDB；再无 → 默认 */
 export async function loadSettings(vfs) {
   try {
     const raw = await vfs.read(SETTINGS_PATH);
-    if (!raw) return normalizeSettings(null);
-    return normalizeSettings(JSON.parse(raw));
-  } catch (e) {
-    return normalizeSettings(null);
-  }
+    if (raw) return normalizeSettings(JSON.parse(raw));
+  } catch (e) { /* 走 IndexedDB 兜底 */ }
+  // 兜底：IndexedDB（刷新后也能恢复，无需挂载项目磁盘）
+  try {
+    if (typeof indexedDB !== 'undefined') {
+      const p = await idbGet(IDB_PREFS_KEY);
+      if (p && typeof p === 'object') return normalizeSettings(p);
+    }
+  } catch (e) { /* 忽略 */ }
+  return normalizeSettings(null);
 }
 
-/** 写回项目文件（经 VFS）；返回最终生效的设置 */
+/** 写回项目文件（经 VFS）；并兜底写 IndexedDB（无需挂载也可持久化）。返回最终生效的设置 */
 export async function saveSettings(vfs, s) {
   const norm = normalizeSettings(s);
   try {
     await vfs.write(SETTINGS_PATH, JSON.stringify(norm, null, 2) + '\n');
   } catch (e) {
-    console.error('[BIOS] 设置写入失败:', e);
+    console.error('[BIOS] 设置写入失败（项目文件）:', e);
   }
+  // 兜底：IndexedDB（即使未挂载项目磁盘，刷新后也能恢复）
+  try {
+    if (typeof indexedDB !== 'undefined') await idbSet(IDB_PREFS_KEY, norm);
+  } catch (e) { /* 忽略 */ }
   return norm;
 }
 

@@ -5,6 +5,7 @@
  * @version     0.7.0
  */
 
+import { idbGet, idbSet } from './drapog.idb.js';
 import { appIcon } from './drapog.registry.js';
 
 /** 规范化主题标识：'windows'/'win' → windows，其余 → macos */
@@ -81,6 +82,24 @@ export class WindowManager {
     this.T = Object.assign({}, THEMES[this.theme], this.themeConfigs[this.theme] || {});
     this.T.palette = paletteArray(this.T);
     this.TASKBAR_H = this.T.taskbarH || 48;
+  }
+  // 偏好持久化（IndexedDB，不依赖文件夹挂载；刷新后也能恢复）
+  async savePrefs() {
+    try {
+      await idbSet('prefs', {
+        theme: this.theme,
+        softKeyboard: !!(this.softKeyboard && this.softKeyboard.open),
+      });
+    } catch (e) { /* 无 IndexedDB 环境忽略 */ }
+  }
+  async loadPrefs() {
+    try {
+      const p = await idbGet('prefs');
+      if (p && typeof p === 'object') {
+        if (p.theme) this.setTheme(p.theme);
+        if (this.softKeyboard && typeof p.softKeyboard === 'boolean') this.softKeyboard.open = p.softKeyboard;
+      }
+    } catch (e) { /* 无 IndexedDB 环境忽略 */ }
   }
 
   createWindow(opts) {

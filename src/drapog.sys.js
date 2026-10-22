@@ -12,7 +12,7 @@ export class DrapSYS {
    * @param {Object} opts.vfs                      虚拟文件系统
    * @param {Function} opts.out                    输出回调
    */
-  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard }) {
+  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard }) {
     this.vm = vm;
     this.vfs = vfs;
     this.out = out || (() => {});
@@ -33,6 +33,8 @@ export class DrapSYS {
     this.onSetTheme = onSetTheme || null;     // (name) => void       切换主题（wm.setTheme）
     this.onOpenFinder = onOpenFinder || null; // (path) => void        在 Finder 打开路径（wm.openFinderAt）
     this.onSetSoftKeyboard = onSetSoftKeyboard || null; // (on) => void  切换软键盘（wm.softKeyboard.open）
+    this.onGetThemeName = onGetThemeName || null;     // () => 'macos'|'windows'  读取当前主题名
+    this.onGetSoftKeyboard = onGetSoftKeyboard || null; // () => bool  读取软键盘状态
     this.drapWins = new Map(); // winId -> { queue, resolver, drawOps, style, title, dirty }
     this.curWinId = null;      // 当前绘制 / 输入目标窗口
 
@@ -88,6 +90,8 @@ export class DrapSYS {
       0x58: this.win_set_theme.bind(this),     // 切换系统主题（macos/windows）
       0x59: this.win_open_finder.bind(this),   // 在 Finder 打开路径
       0x5a: this.win_set_softkeyboard.bind(this), // 切换移动端软键盘
+      0x5b: this.win_get_theme.bind(this),        // 读取当前主题（0=macos 1=windows）
+      0x5c: this.win_get_softkeyboard.bind(this), // 读取软键盘状态（0=关 1=开）
       0x60: this.args_count.bind(this),
       0x61: this.args_get.bind(this),
     };
@@ -418,6 +422,15 @@ export class DrapSYS {
   win_set_softkeyboard(on) {
     if (typeof this.onSetSoftKeyboard === 'function') this.onSetSoftKeyboard(on != 0);
     return 0;
+  }
+  // 读取当前主题：返回 0=macos 1=windows（设置 App 启动高亮用）
+  win_get_theme() {
+    const name = (typeof this.onGetThemeName === 'function') ? this.onGetThemeName() : 'macos';
+    return name === 'windows' ? 1 : 0;
+  }
+  // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
+  win_get_softkeyboard() {
+    return (typeof this.onGetSoftKeyboard === 'function' && this.onGetSoftKeyboard()) ? 1 : 0;
   }
 
   // 取下一个事件：队列非空立即返回；否则阻塞等待（续体，与 term_read 同机制）

@@ -109,6 +109,28 @@ console.log('== 5. 恢复默认设置 ==');
   ok(f.bootMode === 'auto' && f.timeout === 5 && f.secureBoot === false, '项目文件重置为默认');
 }
 
+console.log('== 6. theme / softKeyboard 字段（UI 偏好持久化）==');
+{
+  // normalize 处理 theme（仅 'macos'|'windows' 合法）+ softKeyboard（布尔）
+  const n1 = S.normalizeSettings({ theme: 'windows', softKeyboard: true });
+  ok(n1.theme === 'windows' && n1.softKeyboard === true, 'theme=windows/softKeyboard=true 被接受');
+  ok(S.DEFAULT_SETTINGS.theme === 'macos' && S.DEFAULT_SETTINGS.softKeyboard === false, '默认 theme=macos/softKeyboard=false');
+  const n2 = S.normalizeSettings({ theme: 'ubuntu', softKeyboard: 'yes' });
+  ok(n2.theme === 'macos' && n2.softKeyboard === false, '非法 theme/非布尔 softKeyboard→默认');
+  // 项目文件 load/save 往返携带 theme/softKeyboard
+  const vfs = await seed({ bootMode: 'auto', timeout: 5, quickPOST: true, bootLogo: true, secureBoot: false, theme: 'windows', softKeyboard: true });
+  const loaded = await S.loadSettings(vfs);
+  ok(loaded.theme === 'windows' && loaded.softKeyboard === true, '从项目文件读回 theme/softKeyboard');
+  const saved = await S.saveSettings(vfs, { theme: 'macos', softKeyboard: false, bootMode: 'gui', timeout: 7 });
+  ok(saved.theme === 'macos' && saved.softKeyboard === false, 'save 合并并回写 theme/softKeyboard');
+  const f = await readFile(vfs);
+  ok(f.theme === 'macos' && f.softKeyboard === false && f.bootMode === 'gui' && f.timeout === 7, '落盘后 theme/softKeyboard 与 boot 字段都在');
+  // 旧 seed（无 theme 字段）→ 不报错，回退默认
+  const legacy = await seed({ bootMode: 'cmd', timeout: 3 });
+  const ln = await S.loadSettings(legacy);
+  ok(ln.theme === 'macos' && ln.softKeyboard === false, '旧 seed 无 theme 字段→默认，且向后兼容');
+}
+
 console.log('');
-if (fail === 0) console.log('BIOS 设置（项目文件 + 两级菜单）验证全部通过 ✓ (' + pass + ' 项)');
+if (fail === 0) console.log('BIOS 设置（项目文件 + 两级菜单 + UI 偏好）验证全部通过 ✓ (' + pass + ' 项)');
 else { console.log(fail + ' 项失败 ✗'); process.exit(1); }

@@ -5,8 +5,8 @@
 entry fn main() -> i32 {
     let win = syscall win_create("设置", 560, 440)
     let cat = 5        // 默认落在「外观」
-    let theme = 0      // 0=macOS 1=Windows（本地跟踪，切换时同步给 WM）
-    let kb = 0         // 软键盘开关（本地跟踪）
+    let theme = syscall win_get_theme()       // 0=macOS 1=Windows（启动读取已保存主题，正确高亮）
+    let kb = syscall win_get_softkeyboard()    // 软键盘开关（启动读取已保存状态，正确显示）
     let W = 0
     let H = 0
     let labels = [""]
