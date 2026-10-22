@@ -1489,8 +1489,11 @@ export class DrapCC {
     this.emit('NEWARR', [String(node.items.length), 'r0']);
     this.emit('MOV', ['r7', 'r0']);
     for (let i = 0; i < node.items.length; i++) {
-      this.genExpr(node.items[i]);
-      this.emit('ARRSET', ['r7', String(i), 'r0']);
+      this.genExpr(node.items[i]);          // r0 = 元素值
+      this.emit('PUSH', ['r0']);            // 暂存元素值（保护不被下面 LI 冲掉）
+      this.emit('LI', ['r1', String(i)]);   // r1 = 常量下标（ARRSET 下标为寄存器，见 ARG_SPEC）
+      this.emit('POP', ['r0']);             // 恢复元素值
+      this.emit('ARRSET', ['r7', 'r1', 'r0']);
     }
     this.emit('MOV', ['r0', 'r7']);
   }

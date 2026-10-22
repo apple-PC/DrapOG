@@ -879,7 +879,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 注：PAT（`ghp_…`）按用户规则保留至整个项目完成后统一注销。
 
 ---
-最后更新：2026-10-21　当前版本：2.4.1（工程化-M5 优化器）
+最后更新：2026-10-21　当前版本：2.5.0（工程化-M6 构建/发布流水线）
 
 ### 四阶段整理目标（用户确认开工）
 用户「开始这四个阶段」，经策略确认**工程化优先**（F 系列）。四阶段锚定（基于真实代码状态，非原构思空想）：
@@ -926,7 +926,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **运行器 `tools/run_dbyte.mjs`**：加载 `.dbyte`（`unpack` 校验），挂载极简 `DrapSYS`（stdout 输出 + 内存 VFS），运行并打印程序输出与退出码。**坑（已修）**：`term_print` 的 `onOutput` 传的是「累计全串」（宿主应幂等替换），运行器初版每次 `write(s)` 全量写出导致输出重复（如 "2525 done"）；改为只写相对上次新增的增量后正常（"25 done"）。
 - 验证：新增 `tests/test_drapld.mjs`（5 组）全绿，覆盖 `.dbyte` 往返运行行为与内存一致、嵌套模块 import 链接运行（mid=leaf+10=17）、CLI 端到端（drapld 产文件 + run_dbyte 运行）、缺失模块引用编译期报错；全套 31 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。
 
-### 工程化-M5：优化器（常量折叠 + 死代码消除，已提交待推送）
+### 工程化-M5：优化器（常量折叠 + 死代码消除，已推送）
 - **动机**：编译器当前是「栈式求值 + 朴素代码生成」（`LI r0,c; PUSH r0; ...; POP r0; ALU` 模式，常量被压到操作数栈），产物里有明显可优化空间（常量算术、被立即覆盖的死 `LI`）。M5 提供一个**纯 IR 变换**优化器，不改 VM、不改变程序可观察行为——为后续「工程化收口 + 发布」提供体积/性能优化的地基，并验证「优化前后运行输出逐字节一致」这一硬约束。
 - **实现**（`src/drapopt.js`，新文件；导出 `foldConstants/eliminateDeadLoads/optimize/stats`）：
   - **常量折叠 `foldConstants`**：栈感知的全局常量传播。除寄存器 `known{r0..r7}` 外，额外维护与运行时操作数栈平行的 `constStack[]`（元素为常量值或 null 未知），因为编译器把常量压栈参与 ALU。处理的指令：`LI`（记 known）、`MOV`（搬运已知值）、`PUSH`（压栈）、`POP`（出栈回填 known）、`ADD/SUB/.../NE`（操作数均已知则就地折叠成 `LI`，值经 `fold()` 求值）、`CALL/SYSCALL`（保守清空 known + constStack，避免经 ABI 误折叠）。`fold()` 语义与 VM 一致：`ADD/SUB` 普通算术、`MUL` 用 `Math.imul`（溢出语义）、`DIV/MOD` 除数为 0 返回 null 不折叠（保留运行期语义）、比较返回 0/1。
@@ -938,3 +938,15 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   2. `fold()` 的 `ADD` 误用 `Math.imul`（导致 `2+3` 被算成 6）；修正为 `a + b`（仅 `MUL` 用 `Math.imul`，与 VM 一致）。
   3. `writesReg` 对 `LOADL offset, rX` 取错参数（原取 `args[0]` 即 offset），导致 `known[r0]` 未被清除、栈模型残留 stale 值，污染后续 `c=a+b`（算成 8 而非 15）；修正为 `case 'LOADL': add(args[1])`。定位时临时用 `DBGOPT=1` 调试日志，已移除。
 - **验证**：新增 `tests/test_opt.mjs`（6 用例）全绿：① 语义保持（优化前后 `term_print` 输出逐字节一致）；② `.dbyte` 往返 + 优化运行一致；③ 优化幂等（再跑一次无变化）；④ 含 `CALL` 的程序安全（CALL 后常量未知不被误折叠）；⑤ 死 LI 消除（被覆盖的 `LI r0` 被删）；⑥ 含 `LOADL` 局部变量的程序正确（`c=a+b`=15）。全套 32 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。指令数未显著下降属预期：编译器栈式求值需 PUSH/POP 维持栈平衡，死常量不能随意删，优化器采取保守安全策略。
+
+### 工程化-M6：构建/发布流水线强化（已提交待推送）
+- **动机**：工程化前五个里程碑（M1–M5）各自独立，`npm test` 虽已含「全量测试 + 静态 import 校验」，但缺少两件把关：（1）**全语料无损往返**——项目硬约束「.drap → .dbyte 字节一致」此前只零散验证，未对仓库内全部 .drapp 应用做覆盖；（2）**GitHub Pages 发布前资产/路径校验**——曾因 `System/Boot/gui.js` 的 `'../src/'` 深度错误导致线上白屏，发布前无自动化兜底。M6 把校验串成一条 `build` 命令，并补一个版本号提升脚本。
+- **交付物**：
+  - **`tests/test_examples.mjs`（新）**：遍历仓库内所有真实可编译 .drapp（examples/、System/Apps 各 app 的 main.drapp、Users/guest，排除 `_template.app` 占位模板），对每个源做「编译 → pack → unpack → pack」断言两次 pack 字节完全一致，并比对去 LABEL 后的真实指令数、字符串表。覆盖 18 个源文件，把无损往返硬约束扩展到整个应用语料库，纳入 `npm test` 常规回归。编译时自动收集同目录兄弟 .drapp 作为模块源（Calc/Conv 的 `calcutil`/`baseconv`）喂给 `DrapCC`。
+  - **`tools/bump-version.mjs`（新）**：统一提升版本号，保持 `package.json` 与 `docs/CONTEXT.md` 的「当前版本」一致。支持显式版本（`node tools/bump-version.mjs 2.5.0`）或 `--major/--minor/--patch`（默认 patch）。仅更新两个权威版本位；源码内 `@version` 按改动内容手动维护。
+  - **`tools/build.mjs`（新）**：统一构建/发布校验流水线，依序：① `tools/check-imports.mjs`（全仓相对 import 解析）；② `tools/run-tests.mjs`（全部 test_*.mjs，已含 test_examples 全语料往返）；③ **Pages 发布前资产/路径校验**（解析根 `index.html` 是否指向 `_dev/`、解析 `_dev/index.html` 内 `<script src>`/`<link href>` 相对引用并校验文件存在、校验引擎入口 `System/BIOS/bios.js` 存在）。任一环节失败即非零退出，可作为 CI / 发布前把关。`package.json` 新增 `"build"`/`"bump"` 脚本。
+- **M6 顺带修复的两处 DBYTE/编译器不一致（保证 test_examples 能真正往返）**：
+  1. **pack 不识别 `@N` 数字下标**：`unpack` 把 LABEL 压成扁平下标后以 `@N` 形式回填跳转目标，但 `pack` 的 `encodeArg` 只认具名标签 → 重新打包报「未知标签: @N」。已让 `encodeArg` 在 `l` 规格下接受 `@N` 直接返回该整数，使 `pack(unpack(pack(p)))` 字节一致（无损往返硬约束）。
+  2. **pack 忽略 `program.entry`**：`unpack` 丢弃 LABEL 且只携带数值 `entry`，而 `pack` 用 `labelToIndex.get('main')` 重算入口（丢失 → 退回 0），导致 re-pack 入口字段变化、字节不一致。已让 `pack` 优先采用 `program.entry` 数值入口。
+  3. **`ARRSET` 参数规格与编译器不一致（真实 bug）**：`ARG_SPEC` 把 `ARRSET` 下标声明为立即数 `i`（`['r','i','r']`），但编译器在数组元素赋值（`a[i]=v`）处发出**寄存器**下标（`ARRSET r7, r1, r0`），导致 `pack` 报「非法立即数: r1」——DocEdit 等含数组赋值的应用此前**无法被序列化成 .dbyte**（预编译/分发路径会崩）。VM 的 `opnd()` 本就同时接受寄存器与立即数下标，故将 `ARRSET` 规格修正为 `['r','r','r']`，并同步修正 `genArrayLit`（数组字面量原先发立即数下标）改为「`PUSH r0` 暂存元素值 → `LI r1, i` → `POP r0` → `ARRSET r7, r1, r0`」，使所有 `ARRSET` 下标统一为寄存器。该修正让「含数组的程序可预编译为 .dbyte」成为现实，是 M4「.dbyte 分发格式」的必要补全。
+- **验证**：`node tools/build.mjs` 三步全过（import 校验 134 处、33 个测试全绿含 18 源文件无损往返、Pages 资产校验通过）。全套 33 个测试文件（`npm test`）全绿，无回归（含 test_draplang/test_struct/test_docedit/test_tools 等数组相关用例）。版本经 `bump-version --minor` 提升至 2.5.0，package.json 与 CONTEXT.md 一致。

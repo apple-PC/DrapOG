@@ -168,7 +168,7 @@ export const ARG_SPEC = {
   PRINTLN: [],
   NEWARR:['i', 'r'],
   ARRGET:['r', 'r', 'r'],
-  ARRSET:['r', 'i', 'r'],
+  ARRSET:['r', 'r', 'r'],
   ARRLEN:['r'],
   ARRPUSH:['r', 'r'],
   NEWOBJ:['i', 'r'],
@@ -194,7 +194,11 @@ export function pack(program) {
     if (ins.op === 'LABEL') labelToIndex.set(ins.args[0], flat.length);
     else { flat.push(ins); flatLine.push({ line: (ins.line || 0) | 0, col: 0 }); }
   }
-  const entry = labelToIndex.get('main') ?? 0;
+  // 优先用显式数值入口（unpack 产物仅携带数值 entry，已无 'main' 标签），
+  // 保证 pack(unpack(pack(program))) 字节一致；否则回退到 'main' 标签解析。
+  const entry = (typeof program.entry === 'number' && program.entry >= 0)
+    ? program.entry
+    : (labelToIndex.get('main') ?? 0);
 
   const instrBytes = new Uint8Array(flat.length * INSTR_SIZE);
   for (let i = 0; i < flat.length; i++) {
@@ -332,6 +336,12 @@ function encodeArg(spec, arg, labelToIndex) {
     return n & 0xFFFF;
   }
   if (spec === 'l') {
+    // 接受 unpack 产出的数字下标形式 '@N'（已是扁平指令下标，直接返回），
+    // 使 pack(unpack(pack(program))) 字节一致（无损往返硬约束）。
+    if (typeof arg === 'string' && arg.startsWith('@')) {
+      const n = parseInt(arg.slice(1), 10);
+      if (Number.isFinite(n)) return n;
+    }
     const idx = labelToIndex.get(arg);
     if (idx === undefined) throw new Error('未知标签: ' + arg);
     return idx;
