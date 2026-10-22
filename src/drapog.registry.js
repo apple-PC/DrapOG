@@ -42,7 +42,7 @@ export class AppRegistry {
 
   /** 注册一个内建 host 应用（实现已由 WM registerApp 提供） */
   addHost(id, { name, icon, title }) {
-    this.apps.set(id, { id, name, icon: appIcon(id), title: title || name, type: 'host' });
+    this.apps.set(id, { id, name, icon: icon || appIcon(id), title: title || name, type: 'host' });
   }
 
   /** 注册一个 DrapLang 应用：type 'gui' 交 WM，'cli' 跑终端。
@@ -51,7 +51,7 @@ export class AppRegistry {
   addDrap(id, { name, icon, type, file, baseUrl, modules, version, author, description, category }) {
     const url = file ? new URL(file, baseUrl).href : null;
     this.apps.set(id, {
-      id, name, icon: appIcon(id), type,
+      id, name, icon: icon || appIcon(id), type,
       url,
       baseUrl: baseUrl || null,
       modules: modules || [],
@@ -65,7 +65,7 @@ export class AppRegistry {
   /** 注册一个 VFS 路径型 DrapLang 应用（mount 模式下由扫描发现）。info 含 name/icon/type/entry 等全量字段 */
   addDrapVfs(id, info) {
     const rec = Object.assign({ id, type: info.type || 'gui' }, info);
-    rec.icon = appIcon(id);   // 统一图标：忽略 Info.json 里的 icon，用前两字母
+    rec.icon = info.icon || appIcon(id);   // 优先用 Info.json 里的图标，退化用前两字母
     this.apps.set(id, rec);
   }
 

@@ -650,16 +650,26 @@ export class WindowManager {
     return { cells };
   }
 
+  // 选取应用显示图标：registry 里若配了 emoji（含非 ASCII）则优先用；否则退回 monogram 字母
+  appGlyph(id, letter) {
+    const rec = this.registry && this.registry.apps.get(id);
+    const icon = rec && rec.icon;
+    if (icon && /[^\x00-\x7F]/.test(icon)) return icon;     // 含非 ASCII（emoji / ◆ 等）→ 用原图标
+    return letter || (icon ? icon[0] : '?');                 // 否则用两字母 monogram
+  }
+
   renderDesktopIcons(W, H) {
     const ctx = this.ctx;
     const { cells } = this.desktopIconLayout(W, H);
     for (const c of cells) {
       ctx.fillStyle = 'rgba(255,255,255,0.10)';
       this.roundRect(c.x, c.y, c.tile, c.tile, 12); ctx.fill();
+      const glyph = this.appGlyph(c.id, c.letter);
+      const isEmoji = /[^\x00-\x7F]/.test(glyph);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.font = '26px -apple-system, sans-serif';
+      ctx.font = (isEmoji ? '30px' : '26px') + ' -apple-system, "Apple Color Emoji", sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(c.letter, c.x + c.tile / 2, c.y + c.tile / 2);
+      ctx.fillText(glyph, c.x + c.tile / 2, c.y + c.tile / 2);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
       ctx.font = '12px -apple-system, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -861,9 +871,11 @@ export class WindowManager {
     for (const it of L.apps) {
       ctx.fillStyle = 'rgba(255,255,255,0.10)';
       this.roundRect(it.x, it.y, it.w, it.h, 6); ctx.fill();
+      const glyph = this.appGlyph(it.app.id, it.app.letter);
+      const isEmoji = /[^\x00-\x7F]/.test(glyph);
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.font = '600 12px -apple-system, "Segoe UI", sans-serif';
-      ctx.fillText(it.app.letter, it.x + it.w / 2, cy + 1);
+      ctx.font = (isEmoji ? '20px' : '600 12px') + ' -apple-system, "Apple Color Emoji", "Segoe UI", sans-serif';
+      ctx.fillText(glyph, it.x + it.w / 2, cy + 1);
     }
     // 最小化窗口
     for (const it of L.minis) {
@@ -1101,8 +1113,11 @@ export class WindowManager {
         const c = i % L.cols, r = Math.floor(i / L.cols);
         const ax = gx + c * cellW, ay = gy + r * cellH;
         ctx.fillStyle = 'rgba(255,255,255,0.08)'; this.roundRect(ax, ay, L.iconS, L.iconS, 8); ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '600 14px sans-serif';
-        ctx.fillText(this.apps[i].letter, ax + L.iconS / 2, ay + L.iconS / 2);
+        const glyph = this.appGlyph(this.apps[i].id, this.apps[i].letter);
+        const isEmoji = /[^\x00-\x7F]/.test(glyph);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = (isEmoji ? '28px' : '600 14px') + ' -apple-system, "Apple Color Emoji", sans-serif';
+        ctx.fillText(glyph, ax + L.iconS / 2, ay + L.iconS / 2);
         ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '11px sans-serif';
         ctx.fillText(String(this.apps[i].title).slice(0, 6), ax + L.iconS / 2, ay + L.iconS + 14);
       }
@@ -1263,6 +1278,7 @@ export class WindowManager {
     const iconY = dockY + (dockH - this.DOCK_ICON) / 2;
     let idx = 0;
     const drawIcon = (x, letter, dim) => {
+      const isEmoji = /[^\x00-\x7F]/.test(letter);
       const g = ctx.createLinearGradient(x, iconY, x, iconY + this.DOCK_ICON);
       if (dim) {
         g.addColorStop(0, 'rgba(255, 255, 255, 0.16)');
@@ -1275,19 +1291,15 @@ export class WindowManager {
       this.roundRect(x, iconY, this.DOCK_ICON, this.DOCK_ICON, 10);
       ctx.fill();
       ctx.fillStyle = dim ? 'rgba(255, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.92)';
-      ctx.font = '20px -apple-system, sans-serif';
+      ctx.font = (isEmoji ? '22px' : '20px') + ' -apple-system, "Apple Color Emoji", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(letter, x + this.DOCK_ICON / 2, iconY + this.DOCK_ICON / 2);
-
-      // 焦点小圆点
-      const runningWin = this.windows.find(w => w.appId === letter);
-      // 用 app.id 更准，这里不深究
     };
 
     for (const app of L.icons) {
       const x = dockX + 8 + idx * (this.DOCK_ICON + L.spacing);
-      drawIcon(x, app.letter, false);
+      drawIcon(x, this.appGlyph(app.id, app.letter), false);
       // 焦点标记
       const isRunning = this.windows.some(w => w.appId === app.id && !w.minimized);
       if (isRunning) {

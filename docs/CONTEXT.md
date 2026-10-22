@@ -879,7 +879,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - 注：PAT（`ghp_…`）按用户规则保留至整个项目完成后统一注销。
 
 ---
-最后更新：2026-10-21　当前版本：2.5.0（工程化-M6 构建/发布流水线）
+最后更新：2026-10-21　当前版本：2.5.1（工程化-M6 构建/发布流水线）
 
 ### 四阶段整理目标（用户确认开工）
 用户「开始这四个阶段」，经策略确认**工程化优先**（F 系列）。四阶段锚定（基于真实代码状态，非原构思空想）：
@@ -939,7 +939,7 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   3. `writesReg` 对 `LOADL offset, rX` 取错参数（原取 `args[0]` 即 offset），导致 `known[r0]` 未被清除、栈模型残留 stale 值，污染后续 `c=a+b`（算成 8 而非 15）；修正为 `case 'LOADL': add(args[1])`。定位时临时用 `DBGOPT=1` 调试日志，已移除。
 - **验证**：新增 `tests/test_opt.mjs`（6 用例）全绿：① 语义保持（优化前后 `term_print` 输出逐字节一致）；② `.dbyte` 往返 + 优化运行一致；③ 优化幂等（再跑一次无变化）；④ 含 `CALL` 的程序安全（CALL 后常量未知不被误折叠）；⑤ 死 LI 消除（被覆盖的 `LI r0` 被删）；⑥ 含 `LOADL` 局部变量的程序正确（`c=a+b`=15）。全套 32 个测试文件（`npm test`）全绿，import 校验 134 处通过，无回归。指令数未显著下降属预期：编译器栈式求值需 PUSH/POP 维持栈平衡，死常量不能随意删，优化器采取保守安全策略。
 
-### 工程化-M6：构建/发布流水线强化（已提交待推送）
+### 工程化-M6：构建/发布流水线强化（已推送）
 - **动机**：工程化前五个里程碑（M1–M5）各自独立，`npm test` 虽已含「全量测试 + 静态 import 校验」，但缺少两件把关：（1）**全语料无损往返**——项目硬约束「.drap → .dbyte 字节一致」此前只零散验证，未对仓库内全部 .drapp 应用做覆盖；（2）**GitHub Pages 发布前资产/路径校验**——曾因 `System/Boot/gui.js` 的 `'../src/'` 深度错误导致线上白屏，发布前无自动化兜底。M6 把校验串成一条 `build` 命令，并补一个版本号提升脚本。
 - **交付物**：
   - **`tests/test_examples.mjs`（新）**：遍历仓库内所有真实可编译 .drapp（examples/、System/Apps 各 app 的 main.drapp、Users/guest，排除 `_template.app` 占位模板），对每个源做「编译 → pack → unpack → pack」断言两次 pack 字节完全一致，并比对去 LABEL 后的真实指令数、字符串表。覆盖 18 个源文件，把无损往返硬约束扩展到整个应用语料库，纳入 `npm test` 常规回归。编译时自动收集同目录兄弟 .drapp 作为模块源（Calc/Conv 的 `calcutil`/`baseconv`）喂给 `DrapCC`。
@@ -950,3 +950,22 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   2. **pack 忽略 `program.entry`**：`unpack` 丢弃 LABEL 且只携带数值 `entry`，而 `pack` 用 `labelToIndex.get('main')` 重算入口（丢失 → 退回 0），导致 re-pack 入口字段变化、字节不一致。已让 `pack` 优先采用 `program.entry` 数值入口。
   3. **`ARRSET` 参数规格与编译器不一致（真实 bug）**：`ARG_SPEC` 把 `ARRSET` 下标声明为立即数 `i`（`['r','i','r']`），但编译器在数组元素赋值（`a[i]=v`）处发出**寄存器**下标（`ARRSET r7, r1, r0`），导致 `pack` 报「非法立即数: r1」——DocEdit 等含数组赋值的应用此前**无法被序列化成 .dbyte**（预编译/分发路径会崩）。VM 的 `opnd()` 本就同时接受寄存器与立即数下标，故将 `ARRSET` 规格修正为 `['r','r','r']`，并同步修正 `genArrayLit`（数组字面量原先发立即数下标）改为「`PUSH r0` 暂存元素值 → `LI r1, i` → `POP r0` → `ARRSET r7, r1, r0`」，使所有 `ARRSET` 下标统一为寄存器。该修正让「含数组的程序可预编译为 .dbyte」成为现实，是 M4「.dbyte 分发格式」的必要补全。
 - **验证**：`node tools/build.mjs` 三步全过（import 校验 134 处、33 个测试全绿含 18 源文件无损往返、Pages 资产校验通过）。全套 33 个测试文件（`npm test`）全绿，无回归（含 test_draplang/test_struct/test_docedit/test_tools 等数组相关用例）。版本经 `bump-version --minor` 提升至 2.5.0，package.json 与 CONTEXT.md 一致。
+
+### GUI 体验-1：BOIS 偏好设置持久化（已推送）
+- **用户报的 bug**：「bois 偏好设置没有保存在仓库里」——`System/BIOS/`（DrapOG 的 BIOS/系统设置层）里，系统设置 App（`Settings.app`）切 macOS/Windows 主题、开关软键盘，只改运行时状态，**从头到尾没读也没写任何存储**；关掉重开、刷新页面，主题就回到默认 macOS。模型层 `settings.js` 的 `DEFAULT_SETTINGS` 也压根没有 `theme` 字段；GUI 启动流程（`bios→menu→gui`）也没把主题偏好传给 GUI。再加 GUI 启动新建的是**内存 VFS**、根本没挂载项目磁盘，即使写了 `bios.json` 也到不了项目文件。
+- **根因**：UI 偏好（主题/软键盘）从未被建模、从未被持久化、GUI 启动也未应用任何偏好。
+- **修复（全链路）**：
+  1. **模型+持久化层 `System/BIOS/settings.js`**：`DEFAULT_SETTINGS` 新增 `theme('macos'|'windows')` 与 `softKeyboard(bool)`；`normalizeSettings` 处理二者；`loadSettings` 在「项目文件读不到」时回退 **IndexedDB**（`bios_prefs` 键），`saveSettings` 在写项目文件之外**兜底写 IndexedDB**（即使不挂载项目磁盘，刷新也能恢复）。向后兼容：旧 seed 无 `theme` 字段不报错。
+  2. **WM 偏好存取 `src/drapog.wm.js`**：新增 `async loadPrefs()`（从 IndexedDB 读 `theme/softKeyboard` 并应用：`setTheme` + 设 `softKeyboard.open`）与 `savePrefs()`（写 IndexedDB）。`win_set_theme` / `win_set_softkeyboard` 切换时自动触发 `savePrefs()`。
+  3. **系统调用与桥接**：`drapcc.js` 的 `SYS_TABLE` 与参数计数表登记 `win_get_theme(0x5b)`（返回 0=macos 1=windows）与 `win_get_softkeyboard(0x5c)`；`drapog.sys.js` 实现两者并通过新钩子 `onGetThemeName`/`onGetSoftKeyboard` 取宿主状态；`drapog.launcher.js` 在 `onSetTheme`/`onSetSoftKeyboard` 里调用 `wm.savePrefs()` 并暴露 `onGetThemeName`/`onGetSoftKeyboard` 给 `win_get_theme/softkeyboard`。
+  4. **GUI 启动应用偏好 + Settings.app 读取当前主题**：`System/Boot/gui.js` 把屏幕初始化、`new WindowManager` 与 `await wm.loadPrefs()` 提到 `new Promise` 之前，确保偏好在首个窗口创建前已生效（原 `wm.loadPrefs()` 未 await 且包在同步执行器里，等于没生效）；`System/Apps/Settings.app/main.drapp` 启动用 `syscall win_get_theme()` / `win_get_softkeyboard()` 读取已保存状态以正确高亮/显示。
+- **验证**：`tests/test_bios.mjs` 新增第 6 节覆盖 `theme/softKeyboard` 字段（normalize 接受/拒绝、项目文件 load/save 往返携带、旧 seed 向后兼容），`npm test` 33 项全绿；`npm run build` 全过。
+
+### GUI 体验-2：桌面/坞/开始菜单/AppMgr 采用 emoji 图标（已推送）
+- **动机**：此前 WM 所有图标（桌面、`dock`、Windows 开始菜单、AppManager 网格、窗口标题）统一用 `appIcon(id)` 生成的 2 字母 monogram（Fi/Te/Ca/He…）。但 `System/Boot/gui.js` 注册应用时其实传了 macOS 风格 emoji 图标（📁 Finder、🧮 Calc、📝 DocEdit、⚙ 设置、🗑 废纸篓、💻 此电脑、🔟 Conv、◆ AppMgr），却被 `AppRegistry` 三处 `addHost/addDrap/addDrapVfs` 用 `appIcon(id)` 覆盖丢掉。monogram 辨识度低、不像真系统。
+- **修复**：`drapog.registry.js` 的 `addHost/addDrap/addDrapVfs` 改为**保留传入的 `icon`**（emoji），仅在未传时退化用 `appIcon(id)`；`drapog.wm.js` 新增 `appGlyph(id, letter)`：渲染时优先取 registry 里**含非 ASCII 字符的图标**（emoji / ◆ 等），否则退回两字母 monogram。桌面图标、坞、`renderStartMenu`、AppManager 网格四处渲染统一改用 `appGlyph` 并随图标类型切换字号（emoji 用大字号 + `"Apple Color Emoji"` 字体回退）。窗口标题栏沿用 monogram 不受影响。纯渲染改动，无 ABI/逻辑变化。
+- **验证**：`npm test` 33 项全绿（含 `test_wm.mjs`）；`npm run build` 全过；`node --check` 语法通过。提交前已确认 emoji 在 canvas 走系统 emoji 字体渲染，刷新即生效、无需重编译。
+
+---
+
+最后更新：2026-10-22　当前版本：2.5.1（GUI 体验：BOIS 偏好持久化 + emoji 图标）
