@@ -976,6 +976,15 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
   - 16 个 `.app` 包新增 `icon.json`：GUI 应用（Calc 计算器网格 / Conv 进制方块 / DocEdit 文档线条 / Settings 齿轮 / Trash 垃圾桶 / ThisPC 显示器）+ CLI 工具（Cat/Grep/Head/Ls/Sub/Tail/Tree/Wc 统一「终端暗底 + 命令名 + 强调色条」）+ Hello（绿底 `>_`）+ `_template`（灰问号）。
 - **验证**：`node --check` 四个文件语法通过；`npm test` 33/33 全绿；`npm run build` 全过（Pages 资产校验通过）；16 个 icon.json 均为合法 JSON。
 
+### GUI 体验-4：整体质感对标 CSPS 模拟器（景深/标题栏渐变/图标选中反馈）
+- **动机**：用户对比同机另一个项目「CSPS 模拟器」（CSP-S 复赛仿真，Web 应用，生产级视觉语言）后指出：DrapOG 手绘图标不错，但**整体「像真软件」的质感**仍不如它——差距不是 emoji（已弃用），而是：①窗口标题栏是纯平色块（CSPS 用细竖向渐变）；②桌面图标无任何选中/悬停反馈（CSPS 有半透明高亮框+边框+hover）；③窗口边框发虚、缺内高光；④坞/面板缺玻璃高光。
+- **落地**（`drapog.wm.js`，均纯渲染/轻交互，无 ABI 变化）：
+  - 窗口标题栏：`renderWindow` 由纯平色改为**细竖向渐变**（聚焦顶亮底暗，失焦略暗）+ 顶边 1px 内高光；边框 0.5px→1px 更实，增强景深。
+  - 桌面图标：`renderDesktopIcons` 增**选中/悬停高亮框**（选中=蓝调半透明+边框，悬停=白调半透明）；`onMouseMove` 无拖拽时更新 `hoverDesktopIconId`；`onMouseDown` 改「单击选中、双击启动」（仿真实 OS，同时清掉点空白取消选中）。
+  - 坞：`renderDock` 边框 0.5px→1px + 顶部 1px 内高光，玻璃质感更明显。
+  - 新增 WM 状态：`hoverDesktopIconId` / `selectedDesktopIconId` / `_lastDeskClick`。
+- **验证**：`node --check` 通过；`npm test` 33/33；`npm run build` 全过。
+
 ---
 
-最后更新：2026-10-22　当前版本：2.5.1（GUI 体验：BOIS 偏好持久化 + 手绘 macOS 风格图标）
+最后更新：2026-10-22　当前版本：2.5.1（GUI 体验：BOIS 偏好持久化 + 手绘图标 + 整体质感对标 CSPS）

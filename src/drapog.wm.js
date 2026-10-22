@@ -43,6 +43,9 @@ export class WindowManager {
     this.zOrder = [];
     this.focusedId = null;
     this.dragState = null;
+    this.hoverDesktopIconId = null;     // 悬停的桌面图标（高亮反馈）
+    this.selectedDesktopIconId = null;  // 选中的桌面图标（仿真实 OS）
+    this._lastDeskClick = null;        // 桌面图标双击判定
 
     this.MENU_BAR_H = 28;
     this.DOCK_H = 60;
@@ -329,6 +332,9 @@ export class WindowManager {
     if (this.locked) { this.unlock(); return; }
     if (this.shutdown) { this.powerOn(); return; }
 
+    // 点击非桌面图标处时清除桌面图标选中态（点空白桌面也会取消选中）
+    this.selectedDesktopIconId = null;
+
     // 主菜单打开：命中项则执行，否则关闭并吞掉本次点击
     if (this.menu) { this.runMenuAction(this.hitMenu(x, y)); return; }
 
@@ -369,7 +375,19 @@ export class WindowManager {
     const w = this.hitTest(x, y);
     if (!w) {
       const di = this.hitDesktopIcon(x, y);
-      if (di) { this.launchApp(di); return; }
+      if (di) {
+        // 单击选中、双击启动（仿真实 OS 桌面交互）；单击只选中不启动
+        const now = Date.now();
+        if (this._lastDeskClick && this._lastDeskClick.id === di.id && now - this._lastDeskClick.t < 350) {
+          this.selectedDesktopIconId = di.id;
+          this.launchApp(di);
+          this._lastDeskClick = null;
+        } else {
+          this.selectedDesktopIconId = di.id;
+          this._lastDeskClick = { id: di.id, t: now };
+        }
+        return;
+      }
       return;
     }
     this.bringToFront(w.id);
@@ -401,7 +419,13 @@ export class WindowManager {
   }
 
   onMouseMove(x, y) {
-    if (!this.dragState) return;
+    // 无拖拽时更新桌面图标悬停高亮（持续帧渲染会自动刷新）
+    if (!this.dragState) {
+      const di = this.hitDesktopIcon(x, y);
+      const id = di ? di.id : null;
+      if (id !== this.hoverDesktopIconId) this.hoverDesktopIconId = id;
+      return;
+    }
     const w = this.windows.find(w => w.id === this.dragState.id);
     if (!w) { this.dragState = null; return; }
     if (this.dragState.mode === 'resize') { this.applyResize(w, x, y); return; }
@@ -747,6 +771,19 @@ export class WindowManager {
     const ctx = this.ctx;
     const { cells } = this.desktopIconLayout(W, H);
     for (const c of cells) {
+      // 选中 / 悬停高亮（仿真实 OS：半透明高亮框 + 边框，对标 CSPS .s-icon.selected）
+      const sel = c.id === this.selectedDesktopIconId;
+      const hov = c.id === this.hoverDesktopIconId && !sel;
+      if (sel || hov) {
+        const bx = c.x - 6, by = c.y - 6, bw = c.tile + 12, bh = c.tile + 22;
+        ctx.fillStyle = sel ? 'rgba(90, 150, 220, 0.30)' : 'rgba(255, 255, 255, 0.10)';
+        this.roundRect(bx, by, bw, bh, 8); ctx.fill();
+        if (sel) {
+          ctx.strokeStyle = 'rgba(160, 200, 255, 0.65)';
+          ctx.lineWidth = 1;
+          this.roundRect(bx, by, bw, bh, 8); ctx.stroke();
+        }
+      }
       if (!this.drawAppIcon(c.id, c.x, c.y, c.tile)) {
         ctx.fillStyle = 'rgba(255,255,255,0.10)';
         this.roundRect(c.x, c.y, c.tile, c.tile, 12); ctx.fill();
@@ -815,19 +852,25 @@ export class WindowManager {
     ctx.fill();
     ctx.restore();
 
-    // 边框
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-    ctx.lineWidth = 0.5;
+    // 边框（1px 实边 + 顶部内高光，增强玻璃质感与景深）
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
     this.roundRect(w.x, w.y, w.w, w.h, R);
     ctx.stroke();
 
-    // 标题栏底
+    // 标题栏底（细竖向渐变，比纯平色更有真实景深，对标 CSPS 窗口标题栏）
     ctx.save();
     ctx.beginPath();
     this.roundRect(w.x, w.y, w.w, w.TITLEBAR_H + R, R);
     ctx.clip();
-    ctx.fillStyle = focused ? 'rgba(58, 58, 64, 0.98)' : 'rgba(46, 46, 50, 0.98)';
+    const tg = ctx.createLinearGradient(0, w.y, 0, w.y + w.TITLEBAR_H);
+    if (focused) { tg.addColorStop(0, 'rgba(76, 76, 84, 0.99)'); tg.addColorStop(1, 'rgba(50, 50, 58, 0.99)'); }
+    else         { tg.addColorStop(0, 'rgba(60, 60, 68, 0.98)'); tg.addColorStop(1, 'rgba(42, 42, 48, 0.98)'); }
+    ctx.fillStyle = tg;
     ctx.fillRect(w.x, w.y, w.w, w.TITLEBAR_H);
+    // 顶边内高光
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.fillRect(w.x + R, w.y + 0.5, w.w - 2 * R, 1);
     ctx.restore();
 
     // 标题栏底部分隔线
@@ -1362,10 +1405,13 @@ export class WindowManager {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
     this.roundRect(dockX, dockY, dockW, dockH, 16);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+    ctx.lineWidth = 1;
     this.roundRect(dockX, dockY, dockW, dockH, 16);
     ctx.stroke();
+    // 顶部内高光（玻璃质感）
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.fillRect(dockX + 12, dockY + 1, dockW - 24, 1);
 
     const iconY = dockY + (dockH - this.DOCK_ICON) / 2;
     let idx = 0;
