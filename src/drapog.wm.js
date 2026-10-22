@@ -776,10 +776,11 @@ export class WindowManager {
       const hov = c.id === this.hoverDesktopIconId && !sel;
       if (sel || hov) {
         const bx = c.x - 6, by = c.y - 6, bw = c.tile + 12, bh = c.tile + 22;
-        ctx.fillStyle = sel ? 'rgba(90, 150, 220, 0.30)' : 'rgba(255, 255, 255, 0.10)';
+        const sc = this.T.palette[4];  // 主题强调色 sel（macOS 蓝 / Windows 蓝）
+        ctx.fillStyle = sel ? `rgba(${sc[0]}, ${sc[1]}, ${sc[2]}, 0.30)` : 'rgba(255, 255, 255, 0.10)';
         this.roundRect(bx, by, bw, bh, 8); ctx.fill();
         if (sel) {
-          ctx.strokeStyle = 'rgba(160, 200, 255, 0.65)';
+          ctx.strokeStyle = `rgba(${sc[0]}, ${sc[1]}, ${sc[2]}, 0.65)`;
           ctx.lineWidth = 1;
           this.roundRect(bx, by, bw, bh, 8); ctx.stroke();
         }

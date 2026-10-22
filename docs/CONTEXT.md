@@ -980,7 +980,8 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **动机**：用户对比同机另一个项目「CSPS 模拟器」（CSP-S 复赛仿真，Web 应用，生产级视觉语言）后指出：DrapOG 手绘图标不错，但**整体「像真软件」的质感**仍不如它——差距不是 emoji（已弃用），而是：①窗口标题栏是纯平色块（CSPS 用细竖向渐变）；②桌面图标无任何选中/悬停反馈（CSPS 有半透明高亮框+边框+hover）；③窗口边框发虚、缺内高光；④坞/面板缺玻璃高光。
 - **落地**（`drapog.wm.js`，均纯渲染/轻交互，无 ABI 变化）：
   - 窗口标题栏：`renderWindow` 由纯平色改为**细竖向渐变**（聚焦顶亮底暗，失焦略暗）+ 顶边 1px 内高光；边框 0.5px→1px 更实，增强景深。
-  - 桌面图标：`renderDesktopIcons` 增**选中/悬停高亮框**（选中=蓝调半透明+边框，悬停=白调半透明）；`onMouseMove` 无拖拽时更新 `hoverDesktopIconId`；`onMouseDown` 改「单击选中、双击启动」（仿真实 OS，同时清掉点空白取消选中）。
+  - 桌面图标：`renderDesktopIcons` 增**选中/悬停高亮框**（选中色走主题色板 `this.T.palette[4]`=sel，macOS 蓝/Windows 蓝自动适配；悬停=白调半透明）；`onMouseMove` 无拖拽时更新 `hoverDesktopIconId`；`onMouseDown` 改「单击选中、双击启动」（仿真实 OS，与 dock 单击语义分流；点空白取消选中）。
+  - **原则审计（用户拍板）**：4 条硬原则（无解释器 / JS 只做硬件 / 真实磁盘 / 主题只提供数据）均未破坏；双主题均正常渲染。两处收敛——①桌面点击维持「单击选中+双击启动」（保留真实 OS 手感）；②选中高亮色由写死蓝改为读主题色板 sel（尊重双主题一致性，零成本）。标题栏渐变仍走写死深灰（改动前即如此，两主题皆深色暂可用，将来加浅色主题需改走 palette.toolbar）。
   - 坞：`renderDock` 边框 0.5px→1px + 顶部 1px 内高光，玻璃质感更明显。
   - 新增 WM 状态：`hoverDesktopIconId` / `selectedDesktopIconId` / `_lastDeskClick`。
 - **验证**：`node --check` 通过；`npm test` 33/33；`npm run build` 全过。
