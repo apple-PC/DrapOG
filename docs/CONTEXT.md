@@ -966,6 +966,16 @@ test_event.mjs（on_paint/on_click/on_key/on_input/on_close）+ test_gui 复用�
 - **修复**：`drapog.registry.js` 的 `addHost/addDrap/addDrapVfs` 改为**保留传入的 `icon`**（emoji），仅在未传时退化用 `appIcon(id)`；`drapog.wm.js` 新增 `appGlyph(id, letter)`：渲染时优先取 registry 里**含非 ASCII 字符的图标**（emoji / ◆ 等），否则退回两字母 monogram。桌面图标、坞、`renderStartMenu`、AppManager 网格四处渲染统一改用 `appGlyph` 并随图标类型切换字号（emoji 用大字号 + `"Apple Color Emoji"` 字体回退）。窗口标题栏沿用 monogram 不受影响。纯渲染改动，无 ABI/逻辑变化。
 - **验证**：`npm test` 33 项全绿（含 `test_wm.mjs`）；`npm run build` 全过；`node --check` 语法通过。提交前已确认 emoji 在 canvas 走系统 emoji 字体渲染，刷新即生效、无需重编译。
 
+### GUI 体验-3：app 包内手绘 macOS 风格图标（icon.json + drawAppIcon）
+- **动机**：用户明确否决 emoji 方案——「emoji 太乱，没法快速表现 app 功能」。改用**每个 app 包内自描述的手绘图标规格** `icon.json`（归一化 0–100 坐标 + 垂直渐变底），由 WM 统一画 macOS squircle（圆角方形 + 渐变 + 顶部玻璃高光 + 白色象形图形），视觉与参考截图一致、辨识度高、纯渲染无 ABI 变化、易回退。
+- **规格格式**：`{ "bg": ["#顶色","#底色"], "fg": [ 图形指令... ] }`。图形指令：`r` 圆角矩形 / `c` 圆 / `l` 线段 / `p` 多边形 / `t` 文字，坐标全部 0–100 再乘 `size/100`。
+- **落地**：
+  - `drapog.wm.js`：新增 `drawAppIcon(id,x,y,size,dim)`（有规格画 squircle 返回 true，无规格返回 false 让调用方退回旧字母渲染）+ `iconSpecOf(id)`（从 registry 取 `rec.iconSpec`）；桌面图标、坞、开始菜单、AppMgr 网格、AppMgr 窗口、坞 minis 共 6 处渲染改用 `drawAppIcon`，加载完成前退回字母。
+  - `drapog.registry.js`：`addHost/addDrap` 接受 `iconSpec`；`scan()` 从 `.app` 包读 `icon.json` 存入 `rec.iconSpec`（不再覆盖成 monogram 字母）。
+  - `System/Boot/gui.js`：内建 host 应用（finder/terminal/edit/about/appmgr）内联 `iconSpec`；内存模式下对 `hello/calc/conv/docedit/settings/trash/thispc` 异步 `fetch` 各自 `icon.json`（挂载模式由 `scan` 读取）；画布每帧重绘，加载后自动生效。
+  - 16 个 `.app` 包新增 `icon.json`：GUI 应用（Calc 计算器网格 / Conv 进制方块 / DocEdit 文档线条 / Settings 齿轮 / Trash 垃圾桶 / ThisPC 显示器）+ CLI 工具（Cat/Grep/Head/Ls/Sub/Tail/Tree/Wc 统一「终端暗底 + 命令名 + 强调色条」）+ Hello（绿底 `>_`）+ `_template`（灰问号）。
+- **验证**：`node --check` 四个文件语法通过；`npm test` 33/33 全绿；`npm run build` 全过（Pages 资产校验通过）；16 个 icon.json 均为合法 JSON。
+
 ---
 
-最后更新：2026-10-22　当前版本：2.5.1（GUI 体验：BOIS 偏好持久化 + emoji 图标）
+最后更新：2026-10-22　当前版本：2.5.1（GUI 体验：BOIS 偏好持久化 + 手绘 macOS 风格图标）

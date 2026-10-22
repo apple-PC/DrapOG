@@ -63,11 +63,40 @@ export async function startGUI(opts = {}) {
     wm.vfs = vfs;
     wm.registry = registry;
 
-    registry.addHost('finder',   { name: 'Finder',       icon: '📁', title: 'Finder' });
-    registry.addHost('terminal', { name: 'Terminal',     icon: '>',  title: 'Terminal' });
-    registry.addHost('edit',     { name: 'TextEdit',     icon: 'T',  title: 'TextEdit' });
-    registry.addHost('about',    { name: '关于本机',     icon: 'W',  title: '关于本机' });
-    registry.addHost('appmgr',   { name: '应用',         icon: '◆',  title: '应用' });
+    // 内建 host 应用（手绘 macOS 风格 iconSpec：bg 垂直渐变 + 0–100 归一化图形指令，与 .app 包 icon.json 同格式）
+    registry.addHost('finder',   { name: 'Finder',       title: 'Finder',
+      iconSpec: { bg: ['#c6e8ff', '#3aa0e8'], fg: [
+        { t: 'r', x: 10, y: 10, w: 38, h: 80, rad: 14, c: '#ffffff' },   // 左半白（经典双色调）
+        { t: 'r', x: 32, y: 30, w: 8, h: 15, rad: 4, c: '#2a3b4d' },     // 左眼
+        { t: 'r', x: 58, y: 30, w: 8, h: 15, rad: 4, c: '#2a3b4d' },     // 右眼
+        { t: 'l', x1: 32, y1: 66, x2: 68, y2: 60, w: 6, c: '#2a3b4d' },  // 微笑
+      ] } });
+    registry.addHost('terminal', { name: 'Terminal',     title: 'Terminal',
+      iconSpec: { bg: ['#4a4a4f', '#1c1c1e'], fg: [
+        { t: 'l', x1: 24, y1: 32, x2: 40, y2: 48, w: 7, c: '#ffffff' },
+        { t: 'l', x1: 40, y1: 48, x2: 24, y2: 64, w: 7, c: '#ffffff' },
+        { t: 'l', x1: 48, y1: 66, x2: 70, y2: 66, w: 7, c: '#ffffff' },
+      ] } });
+    registry.addHost('edit',     { name: 'TextEdit',     title: 'TextEdit',
+      iconSpec: { bg: ['#ffffff', '#e9e9ee'], fg: [
+        { t: 'p', pts: [[24, 8], [62, 8], [78, 24], [78, 92], [24, 92]], c: '#ffffff' },
+        { t: 'p', pts: [[62, 8], [62, 24], [78, 24]], c: '#cfcfd8' },
+        { t: 'r', x: 32, y: 36, w: 38, h: 5, rad: 2.5, c: '#8e8e93' },
+        { t: 'r', x: 32, y: 50, w: 38, h: 5, rad: 2.5, c: '#8e8e93' },
+        { t: 'r', x: 32, y: 64, w: 26, h: 5, rad: 2.5, c: '#8e8e93' },
+      ] } });
+    registry.addHost('about',    { name: '关于本机',     title: '关于本机',
+      iconSpec: { bg: ['#a1a6ad', '#63676e'], fg: [
+        { t: 'c', cx: 50, cy: 50, r: 30, c: '#ffffff' },
+        { t: 't', s: 'i', x: 50, y: 51, size: 42, c: '#7d8590', bold: true },
+      ] } });
+    registry.addHost('appmgr',   { name: '应用',         title: '应用',
+      iconSpec: { bg: ['#64d2ff', '#0a84ff'], fg: [        // Launchpad 风四宫格
+        { t: 'r', x: 24, y: 24, w: 22, h: 22, rad: 6, c: '#ffffff' },
+        { t: 'r', x: 54, y: 24, w: 22, h: 22, rad: 6, c: '#ffffff' },
+        { t: 'r', x: 24, y: 54, w: 22, h: 22, rad: 6, c: '#ffffff' },
+        { t: 'r', x: 54, y: 54, w: 22, h: 22, rad: 6, c: '#ffffff' },
+      ] } });
     // DrapLang 应用（内存模式用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 scan 覆盖）
     // 演示/调色板类应用（GuiDemo/Paint）已移除，只保留实用应用。
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',
@@ -96,8 +125,17 @@ export async function startGUI(opts = {}) {
     registry.addDrap('thispc',   { name: '此电脑',       icon: '💻',  type: 'gui',
       file: '../Apps/ThisPC.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '此电脑（卷与目录 / 打开 Finder）', category: 'system' });
-    // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现）
+    // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现，含各包 icon.json 手绘图标）
     registry.scan(vfs, 'System/Apps').catch(() => {});
+
+    // 内存模式下，.app 包的手绘图标（icon.json）经 fetch 异步加载（挂载模式由 scan 读取）；
+    // 加载完成前的帧退回 emoji/字母渲染，画布每帧重绘故加载后自动生效
+    for (const id of ['hello', 'calc', 'conv', 'docedit', 'settings', 'trash', 'thispc']) {
+      const rec = registry.get(id);
+      if (!rec || !rec.file || !rec.baseUrl) continue;
+      const iconUrl = new URL(rec.file.replace(/[^/]+$/, '') + 'icon.json', rec.baseUrl).href;
+      fetch(iconUrl).then(r => (r.ok ? r.json() : null)).then(spec => { if (spec) rec.iconSpec = spec; }).catch(() => {});
+    }
 
     wm.registerApp('finder',   createFinderApp({ vfs }));
     wm.registerApp('terminal', createTerminalApp({ vfs, DrapShell, registry }));

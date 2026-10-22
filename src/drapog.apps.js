@@ -695,12 +695,17 @@ export function createAppManagerApp({ registry, vfs }) {
         wm.roundRect(c.x, c.y, c.w, c.h, 12); ctx.fill();
         ctx.strokeStyle = 'rgba(255,255,255,0.14)';
         wm.roundRect(c.x, c.y, c.w, c.h, 12); ctx.stroke();
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.font = '28px -apple-system, "Apple Color Emoji", sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(c.a.icon, c.x + c.w / 2, c.y + 30);
+        // 手绘图标（.app 包 icon.json / host 内联 iconSpec）；无规格退回 emoji/字母
+        const iconS = 56, ix = c.x + (c.w - iconS) / 2, iy = c.y + 12;
+        if (!wm.drawAppIcon(c.a.id, ix, iy, iconS)) {
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.font = '28px -apple-system, "Apple Color Emoji", sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(c.a.icon, c.x + c.w / 2, iy + iconS / 2);
+        }
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
         ctx.font = '12px -apple-system, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(c.a.name, c.x + c.w / 2, c.y + c.h - 30);
         const meta = (c.a.version ? 'v' + c.a.version : '') + (c.a.category ? ' · ' + c.a.category : '');
         ctx.fillStyle = 'rgba(255,255,255,0.45)';

@@ -658,18 +658,105 @@ export class WindowManager {
     return letter || (icon ? icon[0] : '?');                 // 否则用两字母 monogram
   }
 
+  /* ---------- 手绘应用图标（macOS 风格） ----------
+     图标规格来源：.app 包内 icon.json（挂载模式经 registry.scan 读取；内存模式 gui.js 异步 fetch）
+     或 host 应用注册时的内联 iconSpec。格式：
+       { "bg": ["#顶色", "#底色"],            // 1~2 个颜色，垂直渐变
+         "fg": [ 图形指令... ] }              // 0–100 归一化坐标
+     图形指令：{t:'r',x,y,w,h,rad,c} 圆角矩形 | {t:'c',cx,cy,r,c} 圆 | {t:'l',x1,y1,x2,y2,w,c} 线段
+              | {t:'p',pts:[[x,y]...],c,close} 多边形 | {t:'t',s,x,y,size,c,bold} 文字 */
+  iconSpecOf(id) {
+    const rec = this.registry && this.registry.apps && this.registry.apps.get(id);
+    return (rec && rec.iconSpec) || null;
+  }
+
+  // 在 (x, y, size) 画 macOS 风格 squircle 图标；有规格返回 true，无规格返回 false（调用方退回旧渲染）
+  drawAppIcon(id, x, y, size, dim = false) {
+    const spec = this.iconSpecOf(id);
+    if (!spec || !Array.isArray(spec.fg)) return false;
+    const ctx = this.ctx;
+    const bg = Array.isArray(spec.bg) ? spec.bg : [spec.bg || '#9a9aa0', spec.bg || '#6d6d74'];
+    const rad = Math.max(4, Math.round(size * 0.225));      // macOS squircle 圆角比例
+    if (dim) ctx.globalAlpha = 0.55;
+    // 底板：垂直渐变 + 细描边
+    const g = ctx.createLinearGradient(x, y, x, y + size);
+    g.addColorStop(0, bg[0]);
+    g.addColorStop(1, bg[bg.length - 1]);
+    ctx.fillStyle = g;
+    this.roundRect(x, y, size, size, rad); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)';
+    ctx.lineWidth = 1;
+    this.roundRect(x + 0.5, y + 0.5, size - 1, size - 1, rad); ctx.stroke();
+    // 顶部玻璃高光
+    const hl = ctx.createLinearGradient(x, y, x, y + size * 0.55);
+    hl.addColorStop(0, 'rgba(255,255,255,0.30)');
+    hl.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hl;
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.lineTo(x + size - rad, y);
+    ctx.quadraticCurveTo(x + size, y, x + size, y + rad);
+    ctx.lineTo(x + size, y + size * 0.55);
+    ctx.lineTo(x, y + size * 0.55);
+    ctx.lineTo(x, y + rad);
+    ctx.quadraticCurveTo(x, y, x + rad, y);
+    ctx.fill();
+    // 图形指令（裁剪到 squircle 内，坐标 0–100 → size）
+    const k = size / 100;
+    ctx.save();
+    this.roundRect(x, y, size, size, rad); ctx.clip();
+    for (const s of spec.fg) {
+      const c = s.c || '#fff';
+      if (s.t === 'r') {
+        ctx.fillStyle = c;
+        this.roundRect(x + s.x * k, y + s.y * k, s.w * k, s.h * k, (s.rad || 0) * k); ctx.fill();
+      } else if (s.t === 'c') {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        ctx.arc(x + s.cx * k, y + s.cy * k, Math.max(0.5, s.r * k), 0, Math.PI * 2);
+        ctx.fill();
+      } else if (s.t === 'l') {
+        ctx.strokeStyle = c;
+        ctx.lineWidth = Math.max(1, (s.w || 5) * k);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x + s.x1 * k, y + s.y1 * k);
+        ctx.lineTo(x + s.x2 * k, y + s.y2 * k);
+        ctx.stroke();
+      } else if (s.t === 'p') {
+        ctx.fillStyle = c;
+        ctx.beginPath();
+        (s.pts || []).forEach((p, i) => i === 0
+          ? ctx.moveTo(x + p[0] * k, y + p[1] * k)
+          : ctx.lineTo(x + p[0] * k, y + p[1] * k));
+        if (s.close !== false) ctx.closePath();
+        ctx.fill();
+      } else if (s.t === 't') {
+        ctx.fillStyle = c;
+        ctx.font = (s.bold ? '600 ' : '') + Math.round((s.size || 30) * k) + 'px -apple-system, "PingFang SC", "Segoe UI", sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.s, x + s.x * k, y + s.y * k);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    return true;
+  }
+
   renderDesktopIcons(W, H) {
     const ctx = this.ctx;
     const { cells } = this.desktopIconLayout(W, H);
     for (const c of cells) {
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      this.roundRect(c.x, c.y, c.tile, c.tile, 12); ctx.fill();
-      const glyph = this.appGlyph(c.id, c.letter);
-      const isEmoji = /[^\x00-\x7F]/.test(glyph);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.font = (isEmoji ? '30px' : '26px') + ' -apple-system, "Apple Color Emoji", sans-serif';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(glyph, c.x + c.tile / 2, c.y + c.tile / 2);
+      if (!this.drawAppIcon(c.id, c.x, c.y, c.tile)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        this.roundRect(c.x, c.y, c.tile, c.tile, 12); ctx.fill();
+        const glyph = this.appGlyph(c.id, c.letter);
+        const isEmoji = /[^\x00-\x7F]/.test(glyph);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = (isEmoji ? '30px' : '26px') + ' -apple-system, "Apple Color Emoji", sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(glyph, c.x + c.tile / 2, c.y + c.tile / 2);
+      }
       ctx.fillStyle = 'rgba(255,255,255,0.92)';
       ctx.font = '12px -apple-system, sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'top';
@@ -869,13 +956,16 @@ export class WindowManager {
     // 应用图标
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const it of L.apps) {
-      ctx.fillStyle = 'rgba(255,255,255,0.10)';
-      this.roundRect(it.x, it.y, it.w, it.h, 6); ctx.fill();
-      const glyph = this.appGlyph(it.app.id, it.app.letter);
-      const isEmoji = /[^\x00-\x7F]/.test(glyph);
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.font = (isEmoji ? '20px' : '600 12px') + ' -apple-system, "Apple Color Emoji", "Segoe UI", sans-serif';
-      ctx.fillText(glyph, it.x + it.w / 2, cy + 1);
+      const s = Math.min(it.w, it.h), ix = it.x + (it.w - s) / 2, iy = it.y + (it.h - s) / 2;
+      if (!this.drawAppIcon(it.app.id, ix, iy, s)) {
+        ctx.fillStyle = 'rgba(255,255,255,0.10)';
+        this.roundRect(it.x, it.y, it.w, it.h, 6); ctx.fill();
+        const glyph = this.appGlyph(it.app.id, it.app.letter);
+        const isEmoji = /[^\x00-\x7F]/.test(glyph);
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.font = (isEmoji ? '20px' : '600 12px') + ' -apple-system, "Apple Color Emoji", "Segoe UI", sans-serif';
+        ctx.fillText(glyph, it.x + it.w / 2, cy + 1);
+      }
     }
     // 最小化窗口
     for (const it of L.minis) {
@@ -1112,12 +1202,14 @@ export class WindowManager {
       for (let i = 0; i < this.apps.length; i++) {
         const c = i % L.cols, r = Math.floor(i / L.cols);
         const ax = gx + c * cellW, ay = gy + r * cellH;
-        ctx.fillStyle = 'rgba(255,255,255,0.08)'; this.roundRect(ax, ay, L.iconS, L.iconS, 8); ctx.fill();
-        const glyph = this.appGlyph(this.apps[i].id, this.apps[i].letter);
-        const isEmoji = /[^\x00-\x7F]/.test(glyph);
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.font = (isEmoji ? '28px' : '600 14px') + ' -apple-system, "Apple Color Emoji", sans-serif';
-        ctx.fillText(glyph, ax + L.iconS / 2, ay + L.iconS / 2);
+        if (!this.drawAppIcon(this.apps[i].id, ax, ay, L.iconS)) {
+          ctx.fillStyle = 'rgba(255,255,255,0.08)'; this.roundRect(ax, ay, L.iconS, L.iconS, 8); ctx.fill();
+          const glyph = this.appGlyph(this.apps[i].id, this.apps[i].letter);
+          const isEmoji = /[^\x00-\x7F]/.test(glyph);
+          ctx.fillStyle = 'rgba(255,255,255,0.92)';
+          ctx.font = (isEmoji ? '28px' : '600 14px') + ' -apple-system, "Apple Color Emoji", sans-serif';
+          ctx.fillText(glyph, ax + L.iconS / 2, ay + L.iconS / 2);
+        }
         ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '11px sans-serif';
         ctx.fillText(String(this.apps[i].title).slice(0, 6), ax + L.iconS / 2, ay + L.iconS + 14);
       }
@@ -1277,7 +1369,8 @@ export class WindowManager {
 
     const iconY = dockY + (dockH - this.DOCK_ICON) / 2;
     let idx = 0;
-    const drawIcon = (x, letter, dim) => {
+    const drawIcon = (x, appId, letter, dim) => {
+      if (this.drawAppIcon(appId, x, iconY, this.DOCK_ICON, dim)) return;
       const isEmoji = /[^\x00-\x7F]/.test(letter);
       const g = ctx.createLinearGradient(x, iconY, x, iconY + this.DOCK_ICON);
       if (dim) {
@@ -1299,7 +1392,7 @@ export class WindowManager {
 
     for (const app of L.icons) {
       const x = dockX + 8 + idx * (this.DOCK_ICON + L.spacing);
-      drawIcon(x, this.appGlyph(app.id, app.letter), false);
+      drawIcon(x, app.id, this.appGlyph(app.id, app.letter), false);
       // 焦点标记
       const isRunning = this.windows.some(w => w.appId === app.id && !w.minimized);
       if (isRunning) {
@@ -1321,7 +1414,7 @@ export class WindowManager {
     }
     for (const w of L.minis) {
       const x = dockX + 8 + idx * (this.DOCK_ICON + L.spacing);
-      drawIcon(x, (w.title[0] || '?').toUpperCase(), true);
+      drawIcon(x, w.appId, this.appGlyph(w.appId, '?'), true);
       idx++;
     }
   }

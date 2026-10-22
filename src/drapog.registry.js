@@ -40,18 +40,19 @@ export class AppRegistry {
     this.apps = new Map();
   }
 
-  /** 注册一个内建 host 应用（实现已由 WM registerApp 提供） */
-  addHost(id, { name, icon, title }) {
-    this.apps.set(id, { id, name, icon: icon || appIcon(id), title: title || name, type: 'host' });
+  /** 注册一个内建 host 应用（实现已由 WM registerApp 提供）。
+   *  iconSpec 为手绘图标规格（macOS 风格 squircle；与 .app 包 icon.json 同格式），无则退回 emoji/字母 */
+  addHost(id, { name, icon, title, iconSpec }) {
+    this.apps.set(id, { id, name, icon: icon || appIcon(id), iconSpec: iconSpec || null, title: title || name, type: 'host' });
   }
 
   /** 注册一个 DrapLang 应用：type 'gui' 交 WM，'cli' 跑终端。
    *  file 为相对 baseUrl 的路径（内存模式用 import.meta.url 拉源码）；modules 为兄弟模块基名数组。
-   *  可选元数据：version / author / description / category（用于 AppMgr 展示） */
-  addDrap(id, { name, icon, type, file, baseUrl, modules, version, author, description, category }) {
+   *  可选元数据：version / author / description / category（用于 AppMgr 展示）/ iconSpec（手绘图标规格） */
+  addDrap(id, { name, icon, type, file, baseUrl, modules, version, author, description, category, iconSpec }) {
     const url = file ? new URL(file, baseUrl).href : null;
     this.apps.set(id, {
-      id, name, icon: icon || appIcon(id), type,
+      id, name, icon: icon || appIcon(id), iconSpec: iconSpec || null, type,
       url,
       baseUrl: baseUrl || null,
       modules: modules || [],
@@ -91,9 +92,16 @@ export class AppRegistry {
       const missing = REQUIRED.filter(k => !info[k]);
       if (missing.length) { console.warn('跳过字段不全的 .app 包（缺 ' + missing.join(',') + '）', base); continue; }
       if (info.type !== 'cli' && info.type !== 'gui') { console.warn('跳过未知 type 的 .app 包', base, info.type); continue; }
+      // 手绘图标规格（可选 icon.json；缺失不影响注册，渲染时退回 emoji/字母）
+      let iconSpec = null;
+      try {
+        const raw = await vfs.read(base + '/icon.json');
+        if (raw) iconSpec = JSON.parse(raw);
+      } catch (e) { console.warn('icon.json 解析失败，退回默认图标', base, e.message); }
       this.addDrapVfs(info.id, {
         name: info.name,
         icon: info.icon || '◆',
+        iconSpec,
         type: info.type,
         entry: base + '/' + info.entry,
         version: info.version || '1.0',
