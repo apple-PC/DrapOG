@@ -501,13 +501,15 @@ export class DrapSYS {
     return this.vm.pushStr(this._shellBuf.join('\n'));
   }
 
-  // 绘制一个应用的图标（手绘 squircle 或字母降级）；成功返回 1，否则 0
+  // 绘制一个应用的图标（手绘 squircle）。注意：DrapLang 桥接应用经 drapAppBridge.render
+  // 事后重放 drawOps，若直接画到 wm.ctx 会被随后重放的「格子底色 fill」覆盖而消失；
+  // 因此这里入队一个 icon 指令，由桥接渲染时按正确 z 序（底色→图标→文字）重放。
+  // 返回 1（已入队）；id 无图标规格时 drawAppIcon 仍会退回字母渲染。
   win_app_icon(idPtr, x, y, size) {
-    const id = this.vm.readStr(idPtr);
-    if (this.wm && typeof this.wm.drawAppIcon === 'function') {
-      return this.wm.drawAppIcon(id, x, y, size) ? 1 : 0;
-    }
-    return 0;
+    const st = this._cur();
+    if (!st) return 0;
+    st.drawOps.push({ op: 'icon', id: this.vm.readStr(idPtr), x, y, size });
+    return 1;
   }
 
   // 把路径移入废纸篓（经 VFS 共享底层工具）；成功返回 1，否则 0

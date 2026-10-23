@@ -72,9 +72,9 @@ export async function startGUI(opts = {}) {
     registry.addDrap('about',    { name: '关于本机',      type: 'gui',
       file: '../Apps/About.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '关于本机（DrapLang 自举版）', category: 'system' });
-    registry.addDrap('appmgr',   { name: '应用',          type: 'gui',
+    registry.addDrap('appmgr',   { name: '启动台',        type: 'gui',
       file: '../Apps/AppMgr.app/main.drapp', baseUrl: import.meta.url,
-      version: '1.0', author: 'DrapOG', description: '应用管理（DrapLang 自举版，网格枚举并启动应用）', category: 'system' });
+      version: '1.0', author: 'DrapOG', description: '启动台（DrapLang 自举版，网格枚举并启动应用）', category: 'system' });
     // DrapLang 应用（内存模式用 import.meta.url 从 .app 包拉源码；挂载真实磁盘时被 scan 覆盖）
     // 演示/调色板类应用（GuiDemo/Paint）已移除，只保留实用应用。
     registry.addDrap('hello',    { name: 'Hello',        icon: 'H',  type: 'cli',

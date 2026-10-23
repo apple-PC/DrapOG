@@ -1,8 +1,8 @@
-// AppMgr —— 应用（DrapLang 自举版，L9·D 阶段示范）
+// 启动台（原 AppMgr，DrapLang 自举版）
 // 从注册表枚举所有应用（win_app_list），网格展示手绘图标 + 名称 + 分类；单击启动（win_app_launch）。
 // 模型：main 初始化共享状态；on_paint 自绘网格；on_click 计算命中格 → 启动对应应用。
 entry fn main() -> i32 {
-    let win = syscall win_create("应用", 520, 420)
+    let win = syscall win_create("启动台", 520, 420)
     let W = 0
     let H = 0
     let list = [""]
@@ -33,7 +33,7 @@ event fn on_paint() {
     syscall win_fill_rect(0, 0, W, H)
     syscall win_theme(1)
     syscall win_set_font(16)
-    syscall win_text(16, 12, "应用")
+    syscall win_text(16, 12, "启动台")
     list = split(syscall win_app_list(), "\n")
     n = len(list)
     cols = (W - PAD * 2 + GAP) / (CELL + GAP)

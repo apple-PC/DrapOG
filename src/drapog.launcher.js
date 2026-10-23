@@ -48,6 +48,9 @@ export const drapAppBridge = {
         ctx.strokeStyle = _rgb(op.color);
         ctx.lineWidth = 1;
         ctx.strokeRect(op.x, op.y, op.w, op.h);
+      } else if (op.op === 'icon') {
+        // 应用手绘图标（macOS squircle）；无规格时 drawAppIcon 退回字母渲染
+        if (wm && typeof wm.drawAppIcon === 'function') wm.drawAppIcon(op.id, op.x, op.y, op.size);
       }
     }
     // 2) 声明式控件（标准样式，宿主自动绘制）
