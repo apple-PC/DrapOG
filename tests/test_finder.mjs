@@ -1,106 +1,130 @@
-// 验证 Finder（文件管理器）增强 + WM 软键盘：
-//   - 新建文件夹 / 文本（命名输入，模拟键盘逐字符）—— 在初始 /Users/guest
-//   - 上一级按钮（cwd 回到上级）
-//   - 系统目录(/System)进入需权限弹窗，允许后才进入
+// 验证 DrapLang 自举版 Finder（System/Apps/Finder.app/main.drapp）的核心行为：
+//   - 首帧绘制
+//   - 新建文件夹 / 新建文本（命名态逐字符输入）
+//   - 上级目录
+//   - 根目录列表含 /System；进入 /System 需权限弹窗，允许后进入
 //   - 系统目录内禁止删除（保护）
-//   - WM 软键盘：打开后点击按键 → 注入合成按键给焦点窗口
-//
-// 说明：Finder 内部 state 为闭包私有；这里通过「录制 render 的 fillText」
-// 捕获地址栏路径（y≈52 行）与错误文本，真实断言 cwd / 权限 / 保护行为。
+//   - openPath 透传：启动时打开指定路径并预览其中文本
+// 另保留 WM 软键盘注入合成按键的断言（与 Finder 实现无关）。
+import assert from 'assert';
+import { readFileSync } from 'fs';
+import { DrapCC } from '../src/drapcc.js';
 import { VFS } from '../src/drapog.vfs.js';
+import { launchDrapAppProgram } from '../src/drapog.launcher.js';
 import { WindowManager } from '../src/drapog.wm.js';
-import { createFinderApp } from '../src/drapog.apps.js';
 
-let failures = 0;
-function assert(cond, msg) {
-  if (cond) console.log('  ✓ ' + msg);
-  else { console.log('  ✗ ' + msg); failures++; }
-}
+let pass = 0, fail = 0;
+function ok(c, m) { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } }
 const tick = () => new Promise(r => setTimeout(r, 0));
+async function settle() { for (let i = 0; i < 10; i++) await tick(); }
 
-const vfs = new VFS();
-const finder = createFinderApp({ vfs });
-const win = { id: 1, w: 400, h: 300, TITLEBAR_H: 34 };
-const fakeWm = { roundRect() {}, bringToFront() {}, closeWindow() {} };
-finder.create(win, fakeWm);
-await tick();
-
-// 录制 ctx：捕获所有 fillText(text, x, y)
-function renderCapture() {
-  const texts = [];
-  const noop = () => {};
-  const ctx = new Proxy({}, {
-    get(t, p) {
-      if (p === 'fillText') return (txt, x, y) => texts.push({ txt: String(txt), x, y });
-      if (p === 'measureText') return () => ({ width: 0 });
-      if (p === 'canvas') return { width: 400, height: 300 };
-      return noop;
-    },
-    set() { return true; },
-  });
-  finder.render(ctx, win, fakeWm);
-  return texts;
-}
-function readCwd() {
-  return (renderCapture().filter(t => t.y >= 50 && t.y <= 54 && t.txt.startsWith('/'))[0] || {}).txt || null;
-}
-function hasText(sub) {
-  return renderCapture().some(t => t.txt.includes(sub));
+function compile(app) {
+  const src = readFileSync('System/Apps/' + app + '.app/main.drapp', 'utf8');
+  return new DrapCC(src).compile();
 }
 
-console.log('== A. 新建文件夹（命名输入逐字符，初始 /Users/guest） ==');
-assert(readCwd() === '/Users/guest', '初始 cwd = /Users/guest');
-await finder.onMouseDown(63, 19, win, fakeWm);   // newFolder
-await finder.onKeyDown({ key: 'M' }, win, fakeWm);
-await finder.onKeyDown({ key: 'y' }, win, fakeWm);
-await finder.onKeyDown({ key: 'Enter' }, win, fakeWm);
-await tick();
-assert(await vfs.exists('/Users/guest/My') === true, '新建文件夹 /Users/guest/My 已创建');
+// 桩 WM：只实现 Finder 启动所需的钩子
+function makeWM() {
+  let id = 1; let lastWin = null;
+  return {
+    T: { palette: [[38,38,42],[232,232,237],[10,132,255],[46,46,50],[10,132,255]] },
+    softKeyboard: { open: false },
+    theme: 'macos',
+    createWindow(opts) { lastWin = { id: id++, title: opts.title, w: opts.w, h: opts.h, __sys: null }; return lastWin; },
+    closeWindow() {},
+    getWin() { return lastWin; },
+    setTheme(name) { this.theme = name; },
+    openFinderAt(p) { this._lastFinder = p; },
+  };
+}
 
-console.log('== B. 新建文本（命名输入逐字符） ==');
-await finder.onMouseDown(101, 19, win, fakeWm);  // newFile
-for (const ch of ['a', '.', 't', 'x', 't']) await finder.onKeyDown({ key: ch }, win, fakeWm);
-await finder.onKeyDown({ key: 'Enter' }, win, fakeWm);
-await tick();
-assert(await vfs.exists('/Users/guest/a.txt') === true, '新建文本 /Users/guest/a.txt 已创建');
+// 在首帧绘制文本里找某行 y 坐标（用于定位列表项）；点击需落在行中心（文字 y + 10）
+function rowYOf(st, prefix) {
+  const ts = st.drawOps.filter(o => o.op === 'text' && typeof o.text === 'string' && o.text.startsWith(prefix));
+  return ts.length ? ts[0].y : -1;
+}
+function texts(st) { return st.drawOps.filter(o => o.op === 'text').map(o => o.text); }
 
-console.log('== C. 「上一级」按钮 ==');
-await finder.onMouseDown(25, 19, win, fakeWm); await tick();   // parent
-assert(readCwd() === '/Users', '点「上一级」后 cwd = /Users');
-await finder.onMouseDown(25, 19, win, fakeWm); await tick();   // parent
-assert(readCwd() === '/', '再点「上一级」后 cwd = /');
+async function testFinder() {
+  const vfs = new VFS();
+  await vfs.mkdir('/Users/guest');
+  await vfs.mkdir('/System');
+  await vfs.write('/System/BIOS', 'BIOS v1');
+  await vfs.write('/Users/guest/readme.txt', 'hello');
+  const wm = makeWM();
+  const sys = launchDrapAppProgram(wm, vfs, compile('Finder'));
+  const win = wm.getWin(); const st = sys.drapWins.get(win.id);
+  await settle();
+  ok(st.drawOps.length > 0, 'Finder 首帧已绘制');
 
-console.log('== D. 系统目录进入需权限（cwd = /） ==');
-// 根目录 dirs 排序: Applications, Library, System, Users → System 索引 2
-await finder.onDoubleClick(10, 64 + 2 * 28 + 14, win, fakeWm); await tick();
-assert(readCwd() === '/', '双击 /System 被权限拦截，cwd 仍为 /');
-// 点击「允许」按钮（弹窗内）中心
-await finder.onMouseDown(138, 187, win, fakeWm); await tick();
-assert(readCwd() === '/System', '点「允许」后 cwd = /System（已授权进入）');
+  // A. 新建文件夹 My（命名态逐字符）
+  sys.injectWinEvent(win.id, 'click 新文件夹'); await settle();
+  for (const ch of ['M','y']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
+  sys.injectWinEvent(win.id, 'key Enter'); await settle();
+  ok((await vfs.exists('/Users/guest/My')) === true, '新建文件夹 /Users/guest/My 已创建');
 
-console.log('== E. 系统目录内禁止删除（保护） ==');
-// 选中第 0 行（BIOS）再点删除
-await finder.onMouseDown(10, 64 + 0 * 28 + 14, win, fakeWm); await tick();
-await finder.onMouseDown(177, 19, win, fakeWm); await tick();  // delete
-assert(hasText('系统目录受保护'), '在 /System 内删除被拒，提示「系统目录受保护」');
+  // B. 新建文本 a.txt
+  sys.injectWinEvent(win.id, 'click 新文件'); await settle();
+  for (const ch of ['a','.','t','x','t']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
+  sys.injectWinEvent(win.id, 'key Enter'); await settle();
+  ok((await vfs.exists('/Users/guest/a.txt')) === true, '新建文本 /Users/guest/a.txt 已创建');
 
-console.log('== F. WM 软键盘注入合成按键 ==');
-global.window = { SCR_W: 800, SCR_H: 600 };
-const fakeCanvas = {
-  width: 800, height: 600,
-  getContext: () => new Proxy({}, { get: () => () => {}, set: () => true }),
-};
-const wm = new WindowManager(fakeCanvas);
-let lastKey = null;
-wm.registerApp('t', { onKeyDown: (e) => { lastKey = e.key; return true; } });
-wm.launchApp({ id: 't', letter: 'T', title: 'T' });
-wm.softKeyboard.open = true;
-const { rects } = wm.softKeyRects(800, 600);
-const k0 = rects[0];
-wm.onMouseDown(k0.x + k0.w / 2, k0.y + k0.h / 2);
-assert(lastKey === '1', "点击软键盘 '1' → 注入合成按键 key='1' 到焦点窗口");
+  // C. 上级 ×2 → /
+  sys.injectWinEvent(win.id, 'click 上级'); await settle();
+  sys.injectWinEvent(win.id, 'click 上级'); await settle();
+  const sysRowY = rowYOf(st, 'System');
+  ok(sysRowY >= 0, '根目录列表含 /System');
 
+  // D. 进入 /System 需权限；允许后进入；系统目录内禁止删除
+  if (sysRowY >= 0) {
+    sys.injectWinEvent(win.id, 'click 12 ' + (sysRowY + 10)); await settle();  // 选中 /System
+    sys.injectWinEvent(win.id, 'click 打开'); await settle();
+    ok(texts(st).some(x => x === '需要权限'), '点击 /System「打开」弹出权限弹窗（显示「需要权限」）');
+    sys.injectWinEvent(win.id, 'click 允许'); await settle();
+    const biosY = rowYOf(st, 'BIOS');
+    ok(biosY >= 0, '允许后进入 /System，列表含 BIOS');
+    if (biosY >= 0) {
+      sys.injectWinEvent(win.id, 'click 12 ' + (biosY + 10)); await settle();  // 选中 BIOS
+      sys.injectWinEvent(win.id, 'click 删除'); await settle();
+      ok(texts(st).some(x => x.includes('系统目录受保护')), '在 /System 内删除被拒，提示「系统目录受保护」');
+    }
+  }
+
+  // E. openPath 透传 + 文件预览
+  const sys2 = launchDrapAppProgram(wm, vfs, compile('Finder'), null, '/Users/guest');
+  const win2 = wm.getWin(); const st2 = sys2.drapWins.get(win2.id);
+  await settle();
+  const readmeY = rowYOf(st2, 'readme.txt');
+  ok(readmeY >= 0, 'openPath=/Users/guest 启动后列表含 readme.txt');
+  if (readmeY >= 0) {
+    sys2.injectWinEvent(win2.id, 'click 12 ' + (readmeY + 10)); await settle();
+    sys2.injectWinEvent(win2.id, 'click 打开'); await settle();
+    ok(texts(st2).some(x => x === 'readme.txt'), '打开文本文件进入预览视图（标题显示 readme.txt）');
+  }
+}
+
+async function testSoftKeyboard() {
+  global.window = { SCR_W: 800, SCR_H: 600 };
+  const fakeCanvas = { width: 800, height: 600, getContext: () => new Proxy({}, { get: () => () => {}, set: () => true }) };
+  const wm = new WindowManager(fakeCanvas);
+  let lastKey = null;
+  wm.registerApp('t', { onKeyDown: (e) => { lastKey = e.key; return true; } });
+  wm.launchApp({ id: 't', letter: 'T', title: 'T' });
+  wm.softKeyboard.open = true;
+  const { rects } = wm.softKeyRects(800, 600);
+  const k0 = rects[0];
+  wm.onMouseDown(k0.x + k0.w / 2, k0.y + k0.h / 2);
+  ok(lastKey === '1', "点击软键盘 '1' → 注入合成按键 key='1' 到焦点窗口");
+}
+
+console.log('== Finder（DrapLang 自举版）行为验证 + WM 软键盘 ==');
+try {
+  await testFinder();
+  await testSoftKeyboard();
+} catch (e) {
+  fail++; console.log('  ✗ 运行异常: ' + e.message);
+  if (e.stack) console.log(e.stack.split('\n').slice(0, 6).join('\n'));
+}
 console.log('');
-if (failures === 0) console.log('Finder / WM 软键盘验证全部通过 ✓');
-else console.log(failures + ' 项失败 ✗');
-process.exit(failures === 0 ? 0 : 1);
+if (fail === 0) console.log('Finder 行为验证全部通过 ✓ (' + pass + ' 项)');
+else { console.log(fail + ' 项失败 ✗'); process.exit(1); }

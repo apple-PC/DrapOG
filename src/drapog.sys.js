@@ -5,6 +5,8 @@
  * @version     0.6.0
  */
 
+import { moveToTrash } from './drapog.vfs.js';
+
 export class DrapSYS {
   /**
    * @param {Object} opts
@@ -12,7 +14,7 @@ export class DrapSYS {
    * @param {Object} opts.vfs                      虚拟文件系统
    * @param {Function} opts.out                    输出回调
    */
-  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard }) {
+  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard, registry, wm, shell }) {
     this.vm = vm;
     this.vfs = vfs;
     this.out = out || (() => {});
@@ -35,6 +37,13 @@ export class DrapSYS {
     this.onSetSoftKeyboard = onSetSoftKeyboard || null; // (on) => void  切换软键盘（wm.softKeyboard.open）
     this.onGetThemeName = onGetThemeName || null;     // () => 'macos'|'windows'  读取当前主题名
     this.onGetSoftKeyboard = onGetSoftKeyboard || null; // () => bool  读取软键盘状态
+    // 应用注册表 / 窗口管理器（DrapLang 经此枚举并启动应用、绘制应用图标）
+    this.registry = registry || null;     // AppRegistry 实例（app_list / app_launch 用）
+    this.wm = wm || null;                 // WindowManager 实例（app_icon 用）
+    this.shell = shell || null;           // 预留：宿主 shell 实例
+    this._appShell = null;                // win_shell_exec 懒创建的 DrapShell
+    this._shellBuf = [];                  // 宿主命令捕获输出缓冲
+    this._shellCwd = '/Users/guest';      // win_shell_exec 持久工作目录
     this.drapWins = new Map(); // winId -> { queue, resolver, drawOps, style, title, dirty }
     this.curWinId = null;      // 当前绘制 / 输入目标窗口
 
@@ -92,6 +101,13 @@ export class DrapSYS {
       0x5a: this.win_set_softkeyboard.bind(this), // 切换移动端软键盘
       0x5b: this.win_get_theme.bind(this),        // 读取当前主题（0=macos 1=windows）
       0x5c: this.win_get_softkeyboard.bind(this), // 读取软键盘状态（0=关 1=开）
+      // 应用注册表 / 宿主桥接（DrapLang 经此枚举/启动应用、执行命令、绘制图标、移入废纸篓）
+      0x80: this.win_app_list.bind(this),         // 枚举已注册应用（每行 id|name|category）
+      0x81: this.win_app_launch.bind(this),       // 启动应用（id）
+      0x82: this.win_shell_exec.bind(this),       // 执行宿主命令（返回捕获的输出文本）
+      0x83: this.win_app_icon.bind(this),         // 绘制应用图标（id, x, y, size）
+      0x85: this.win_trash.bind(this),            // 把路径移入废纸篓（path）
+      0x86: this.win_get_open_path.bind(this),     // 读取本窗口透传的初始打开路径（openFinderAt 用）
       0x60: this.args_count.bind(this),
       0x61: this.args_get.bind(this),
     };
@@ -431,6 +447,74 @@ export class DrapSYS {
   // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
   win_get_softkeyboard() {
     return (typeof this.onGetSoftKeyboard === 'function' && this.onGetSoftKeyboard()) ? 1 : 0;
+  }
+  // 读取本窗口透传的初始打开路径（openFinderAt 启动时设置；默认空串 → 用应用内默认 cwd）
+  win_get_open_path() {
+    const st = this._cur();
+    return this.vm.pushStr((st && st.__openPath) || '');
+  }
+
+  /* ---------- 应用注册表 / 宿主桥接 ----------
+     DrapLang 应用经此枚举并启动其它应用、绘制应用图标、执行宿主命令、把文件移入废纸篓，
+     从而把 Finder / Terminal / AppMgr / TextEdit / About 等从 JS 宿主改写为 DrapLang 自举。
+  ------------------------------------------------------------ */
+
+  // 枚举已注册应用：返回每行 "id|name|category"，以 \n 分隔；无注册表返回空串
+  win_app_list() {
+    const list = this.registry ? this.registry.all() : [];
+    const text = list
+      .map(a => a.id + '|' + (a.name || a.id) + '|' + (a.category || ''))
+      .join('\n');
+    return this.vm.pushStr(text);
+  }
+
+  // 启动一个应用（id）；成功返回 1，否则 0
+  async win_app_launch(idPtr) {
+    const id = this.vm.readStr(idPtr);
+    if (!this.registry) return 0;
+    try {
+      const r = await this.registry.launch(id, { wm: this.wm, vfs: this.vfs });
+      return (r && r.ok) ? 1 : 0;
+    } catch (e) { return 0; }
+  }
+
+  // 执行一条宿主命令（ls/cd/cat/echo/run...），返回捕获到的输出文本（\n 连接）
+  async win_shell_exec(linePtr) {
+    const line = this.vm.readStr(linePtr);
+    if (!this._appShell) {
+      const { DrapShell } = await import('./drapog.shell.js');
+      this._appShell = new DrapShell({
+        vfs: this.vfs,
+        registry: this.registry,
+        wm: this.wm,
+        print: (s) => { this._shellBuf.push(String(s)); },
+        clear: () => { this._shellBuf = []; },
+        exit: () => {},
+        switchToGUI: () => {},
+      });
+      this._appShell.cwd = this._shellCwd;
+    }
+    this._shellBuf = [];
+    try { await this._appShell.executeLegacy(line); }
+    catch (e) { this._shellBuf.push('错误: ' + e.message); }
+    this._shellCwd = this._appShell.cwd;
+    return this.vm.pushStr(this._shellBuf.join('\n'));
+  }
+
+  // 绘制一个应用的图标（手绘 squircle 或字母降级）；成功返回 1，否则 0
+  win_app_icon(idPtr, x, y, size) {
+    const id = this.vm.readStr(idPtr);
+    if (this.wm && typeof this.wm.drawAppIcon === 'function') {
+      return this.wm.drawAppIcon(id, x, y, size) ? 1 : 0;
+    }
+    return 0;
+  }
+
+  // 把路径移入废纸篓（经 VFS 共享底层工具）；成功返回 1，否则 0
+  async win_trash(pathPtr) {
+    const path = this.vm.readStr(pathPtr);
+    try { return (await moveToTrash(this.vfs, path)) ? 1 : 0; }
+    catch (e) { return 0; }
   }
 
   // 取下一个事件：队列非空立即返回；否则阻塞等待（续体，与 term_read 同机制）

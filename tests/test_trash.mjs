@@ -1,6 +1,6 @@
 // test_trash.mjs —— 验证废纸篓/回收站逻辑（VFS）：移到废纸篓、列表、还原、清空、目录递归、重名
 import { VFS } from '../src/drapog.vfs.js';
-import { moveToTrash, listTrash, restoreFromTrash, emptyTrash, TRASH_DIR } from '../src/drapog.apps.js';
+import { moveToTrash, listTrash, restoreFromTrash, emptyTrash, TRASH_DIR } from '../src/drapog.vfs.js';
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { console.log((c ? '  ✓ ' : '  ✗ ') + m); if (!c) fail++; else pass++; };

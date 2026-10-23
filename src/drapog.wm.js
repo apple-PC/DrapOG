@@ -625,15 +625,12 @@ export class WindowManager {
     });
   }
 
-  // 在 Finder 里打开指定路径（ThisPC 双击用）
+  // 在 Finder 里打开指定路径（ThisPC 双击用）：Finder 已改为 DrapLang 自举，统一经注册表启动并透传 openPath
   openFinderAt(path) {
-    const existing = this.windows.find(w => w.appId === 'finder' && w.minimized);
-    if (existing) { this.restoreWindow(existing.id); }
-    const offset = (this.windows.length % 5) * 24;
-    this.createWindow({
-      x: 120 + offset, y: 80 + offset, w: 620, h: 420,
-      title: 'Finder', appId: 'finder', openPath: path,
-    });
+    if (this.registry) {
+      this.registry.launch('finder', { wm: this, vfs: this.vfs || null, openPath: path })
+        .catch(e => console.error('Finder 启动失败', e));
+    }
   }
 
   /* ==================== 渲染 ==================== */

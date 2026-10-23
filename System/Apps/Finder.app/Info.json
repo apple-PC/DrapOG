@@ -1,0 +1,10 @@
+{
+  "id": "finder",
+  "name": "Finder",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "文件管理器（DrapLang 自举版）",
+  "category": "system"
+}

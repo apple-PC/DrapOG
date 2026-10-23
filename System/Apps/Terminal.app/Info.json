@@ -1,0 +1,10 @@
+{
+  "id": "terminal",
+  "name": "Terminal",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "终端（DrapLang 自举版，win_shell_exec 调宿主命令）",
+  "category": "system"
+}

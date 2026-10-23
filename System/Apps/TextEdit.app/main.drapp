@@ -1,0 +1,124 @@
+// TextEdit —— 简易文本编辑器（DrapLang 自举版，L9·D 阶段示范）
+// 自动加载 /Users/guest/Documents/readme.txt；工具栏 新建 / 打开 / 保存；路径栏（win_input 可编辑）；
+// 文本区光标固定在文末，支持回车换行与退格。模型：main 初始化共享状态；on_paint 自绘；on_key / on_click 处理。
+entry fn main() -> i32 {
+    let win = syscall win_create("TextEdit", 560, 420)
+    syscall win_mono(1)
+    syscall win_set_font(14)
+    let text = ""
+    let path = "/Users/guest/Documents/readme.txt"
+    syscall win_set_input("path", path)
+    let status = ""
+    let loaded = 0
+    let W = 0
+    let H = 0
+    let top = 64
+    let lh = 18
+    let pad = 10
+    let i = 0
+    let total = 0
+    let start = 0
+    let vis = 0
+    let lines = [""]
+    let ln = 0
+    let lastLine = ""
+    let cx = 0
+    let cy = 0
+    let content = 0
+    let eff = ""
+    let id = ""
+    let c = ""
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    // 工具栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 0, W, 34)
+    syscall win_button("新建", 8, 4, 48, 26)
+    syscall win_button("打开", 64, 4, 48, 26)
+    syscall win_button("保存", 120, 4, 48, 26)
+    // 路径栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 34, W, 26)
+    syscall win_input("path", 8, 38, W - 16, 18)
+    eff = syscall win_input_get("path")
+    syscall win_theme(1)
+    syscall win_set_font(12)
+    syscall win_text(8, 41, eff)
+    // 首次加载 readme.txt
+    if (loaded == 0) {
+        loaded = 1
+        content = syscall fs_read(path)
+        if (content != 0) { text = content }
+        syscall win_invalidate(win)
+    }
+    // 文本区
+    lines = split(text, "\n")
+    total = len(lines)
+    vis = (H - top - 22) / lh
+    start = 0
+    if (total > vis) { start = total - vis }
+    i = 0
+    while (i < vis) {
+        ln = start + i
+        if (ln < total) {
+            syscall win_theme(1)
+            syscall win_set_font(14)
+            syscall win_text(pad, top + i * lh, lines[ln])
+        }
+        i = i + 1
+    }
+    // 文末光标
+    lastLine = lines[total - 1]
+    cx = pad + len(lastLine) * 8
+    cy = top + (total - 1 - start) * lh
+    if (cy < H - 22) {
+        syscall win_theme(2)
+        syscall win_fill_rect(cx, cy, 2, 16)
+    }
+    // 状态栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, H - 22, W, 22)
+    syscall win_theme(1)
+    syscall win_set_font(11)
+    syscall win_text(8, H - 18, status + "  " + itoa(len(text)) + " 字符")
+    return 0
+}
+
+event fn on_key(ev: str) {
+    if (ev == "key ") { c = " " }
+    else { c = substr(ev, 4) }
+    if (c == "Enter") { text = text + "\n"; status = "" }
+    else if (c == "Backspace") {
+        if (len(text) > 0) { text = substr(text, 0, len(text) - 1); status = "" }
+    }
+    else if (len(c) == 1) { text = text + c; status = "" }
+    syscall win_invalidate(win)
+    return 0
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    if (id == "新建") { text = ""; status = "已新建" }
+    else if (id == "打开") {
+        eff = syscall win_input_get("path")
+        content = syscall fs_read(eff)
+        if (content != 0) { text = content; status = "已打开 " + eff }
+        else { status = "打开失败 / 不存在" }
+    }
+    else if (id == "保存") {
+        eff = syscall win_input_get("path")
+        syscall fs_write(eff, text)
+        status = "已保存 " + eff
+    }
+    syscall win_invalidate(win)
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

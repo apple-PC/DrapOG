@@ -323,3 +323,80 @@ export class VFS {
   async writeBytes(p, b) { return this._backend().writeBytes(p, b); }
   async rm(p)        { return this._backend().rm(p); }
 }
+
+/* ============================================================
+   废纸篓 / 回收站（共享底层工具）
+   删除 = 移动到 /Library/Trash（重名加序号）；可还原 / 清空。
+   逻辑为纯 VFS 操作，可在 node 下单测；JS 应用与 DrapLang 应用（经 syscall）共用。
+   ============================================================ */
+export const TRASH_DIR = '/Library/Trash';
+
+export async function copyRecursive(vfs, src, dst) {
+  if (await vfs.isDir(src)) {
+    await vfs.mkdir(dst);
+    const items = (await vfs.ls(src)) || [];
+    for (const it of items) await copyRecursive(vfs, vfs.normalize(src, it.name), vfs.normalize(dst, it.name));
+  } else {
+    const c = await vfs.read(src);
+    await vfs.write(dst, c == null ? '' : c);
+  }
+}
+
+export async function rmRecursive(vfs, path) {
+  if (await vfs.isDir(path)) {
+    const items = (await vfs.ls(path)) || [];
+    for (const it of items) await rmRecursive(vfs, vfs.normalize(path, it.name));
+  }
+  await vfs.rm(path);
+}
+
+export async function uniqueIn(vfs, dir, name) {
+  let target = vfs.normalize(dir, name);
+  if (!(await vfs.exists(target))) return target;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let i = 2;
+  while (await vfs.exists(vfs.normalize(dir, stem + ' ' + i + ext))) i++;
+  return vfs.normalize(dir, stem + ' ' + i + ext);
+}
+
+/** 把 path 移入废纸篓（复制→删源）；成功返回 true */
+export async function moveToTrash(vfs, path) {
+  try {
+    const name = path.split('/').filter(Boolean).pop();
+    if (!name) return false;
+    await vfs.mkdir(TRASH_DIR);
+    const target = await uniqueIn(vfs, TRASH_DIR, name);
+    await copyRecursive(vfs, path, target);
+    await rmRecursive(vfs, path);
+    return true;
+  } catch (e) { return false; }
+}
+
+/** 废纸篓条目列表 */
+export async function listTrash(vfs) {
+  try { return (await vfs.ls(TRASH_DIR)) || []; } catch (e) { return []; }
+}
+
+/** 从废纸篓还原 name 到 destDir */
+export async function restoreFromTrash(vfs, name, destDir) {
+  try {
+    const src = vfs.normalize(TRASH_DIR, name);
+    if (!(await vfs.exists(src))) return false;
+    await vfs.mkdir(destDir);
+    const dst = await uniqueIn(vfs, destDir, name);
+    await copyRecursive(vfs, src, dst);
+    await rmRecursive(vfs, src);
+    return true;
+  } catch (e) { return false; }
+}
+
+/** 清空废纸篓 */
+export async function emptyTrash(vfs) {
+  try {
+    const items = (await vfs.ls(TRASH_DIR)) || [];
+    for (const it of items) await rmRecursive(vfs, vfs.normalize(TRASH_DIR, it.name));
+    return true;
+  } catch (e) { return false; }
+}

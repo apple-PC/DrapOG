@@ -118,11 +118,23 @@ async function testThisPC() {
   sys.injectWinEvent(win.id, 'close'); await settle();
 }
 
+async function testSmoke() {
+  for (const app of ['About', 'AppMgr', 'TextEdit', 'Terminal']) {
+    const vfs = makeVFS(); const wm = makeWM();
+    const sys = launchDrapAppProgram(wm, vfs, compile(app));
+    const win = wm.getWin(); const st = sys.drapWins.get(win.id);
+    await settle();
+    ok(st.drawOps.length > 0, app + ' 首帧已绘制（启动无异常）');
+    sys.injectWinEvent(win.id, 'close'); await settle();
+  }
+}
+
 console.log('== Settings / Trash / ThisPC（DrapLang 自举应用）无头冒烟 ==');
 try {
   await testSettings();
   await testTrash();
   await testThisPC();
+  await testSmoke();
 } catch (e) {
   fail++;
   console.log('  ✗ 运行异常: ' + e.message);

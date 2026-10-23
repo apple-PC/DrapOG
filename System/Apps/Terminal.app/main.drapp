@@ -1,0 +1,107 @@
+// Terminal —— 终端（DrapLang 自举版，L9·D 阶段示范）
+// 自绘等宽终端：滚动区显示回显与命令输出（win_shell_exec 调宿主 DrapShell.executeLegacy）；
+// 底部输入行含提示符与光标；回车执行、↑/↓ 浏览历史、Backspace 删除、cd 同步更新提示符路径。
+entry fn main() -> i32 {
+    let win = syscall win_create("Terminal", 560, 380)
+    let W = 0
+    let H = 0
+    let scroll = "DrapOS Terminal —— 输入 help 查看可用命令"
+    let input = ""
+    let history = ""
+    let histIdx = -1
+    let cwd = "/Users/guest"
+    let prompt = ""
+    let out = ""
+    let L = [""]
+    let k = 0
+    let cmd = ""
+    let arg = ""
+    let i = 0
+    let n = 0
+    let vis = 0
+    let start = 0
+    let j = 0
+    let inputY = 0
+    let c = ""
+    let H2 = [""]
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_mono(1)
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    syscall win_theme(1)
+    syscall win_set_font(13)
+    inputY = H - 8 - 20
+    vis = (inputY - 8) / 20
+    L = split(scroll, "\n")
+    n = len(L)
+    start = 0
+    if (n > vis) { start = n - vis }
+    j = 0
+    while (j < vis && start + j < n) {
+        syscall win_text(8, 8 + j * 20, L[start + j])
+        j = j + 1
+    }
+    // 输入行
+    prompt = "guest@drapog:" + cwd + "$ "
+    syscall win_text(8, inputY, prompt + input)
+    syscall win_set_color(255, 255, 255)
+    syscall win_fill_rect(8 + (len(prompt) + len(input)) * 8, inputY, 8, 16)
+    return 0
+}
+
+event fn on_key(ev: str) {
+    c = substr(ev, 4)
+    if (ev == "key Enter") {
+        cmd = input
+        scroll = scroll + "\n" + prompt + cmd
+        if (len(cmd) > 0) {
+            if (len(history) == 0) { history = cmd } else { history = history + "\n" + cmd }
+        }
+        out = syscall win_shell_exec(cmd)
+        if (len(out) > 0) {
+            L = split(out, "\n")
+            k = 0
+            while (k < len(L)) { scroll = scroll + "\n" + L[k]; k = k + 1 }
+        }
+        // 跟踪 cd 以更新提示符
+        if (substr(cmd, 0, 3) == "cd ") {
+            arg = substr(cmd, 3, len(cmd) - 3)
+            cwd = syscall fs_realpath(cwd, arg)
+        }
+        input = ""
+        histIdx = -1
+        syscall win_invalidate(win)
+        return 0
+    }
+    if (ev == "key Backspace") { input = substr(input, 0, len(input) - 1); syscall win_invalidate(win); return 0 }
+    if (ev == "key ArrowUp") {
+        H2 = split(history, "\n")
+        if (len(H2) > 0) {
+            if (histIdx == -1) { histIdx = len(H2) - 1 }
+            else if (histIdx > 0) { histIdx = histIdx - 1 }
+            input = H2[histIdx]
+        }
+        syscall win_invalidate(win); return 0
+    }
+    if (ev == "key ArrowDown") {
+        if (histIdx != -1) {
+            H2 = split(history, "\n")
+            histIdx = histIdx + 1
+            if (histIdx >= len(H2)) { histIdx = -1; input = "" }
+            else { input = H2[histIdx] }
+        }
+        syscall win_invalidate(win); return 0
+    }
+    if (ev == "key ") { input = input + " "; syscall win_invalidate(win); return 0 }
+    if (len(c) == 1) { input = input + c; syscall win_invalidate(win); return 0 }
+    syscall win_invalidate(win)
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

@@ -1,0 +1,100 @@
+// AppMgr —— 应用（DrapLang 自举版，L9·D 阶段示范）
+// 从注册表枚举所有应用（win_app_list），网格展示手绘图标 + 名称 + 分类；单击启动（win_app_launch）。
+// 模型：main 初始化共享状态；on_paint 自绘网格；on_click 计算命中格 → 启动对应应用。
+entry fn main() -> i32 {
+    let win = syscall win_create("应用", 520, 420)
+    let W = 0
+    let H = 0
+    let list = [""]
+    let n = 0
+    let cols = 0
+    let cells = 0
+    let i = 0
+    let rec = ""
+    let id = ""
+    let name = ""
+    let meta = ""
+    let col = 0
+    let row = 0
+    let x = 0
+    let y = 0
+    let idx = 0
+    let found = ""
+    let CELL = 84
+    let GAP = 14
+    let PAD = 16
+    let TOP = 44
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    syscall win_theme(1)
+    syscall win_set_font(16)
+    syscall win_text(16, 12, "应用")
+    list = split(syscall win_app_list(), "\n")
+    n = len(list)
+    cols = (W - PAD * 2 + GAP) / (CELL + GAP)
+    if (cols < 1) { cols = 1 }
+    cells = 0
+    i = 0
+    while (i < n) {
+        rec = list[i]
+        if (len(rec) > 0) {
+            id = split(rec, "|")[0]
+            name = split(rec, "|")[1]
+            if (id != "appmgr") {
+                col = cells % cols
+                row = cells / cols
+                x = PAD + col * (CELL + GAP)
+                y = PAD + TOP + row * (CELL + GAP)
+                syscall win_theme(3)
+                syscall win_fill_rect(x, y, CELL, CELL)
+                syscall win_app_icon(id, x + (CELL - 56) / 2, y + 12, 56)
+                syscall win_theme(1)
+                syscall win_set_font(12)
+                syscall win_text(x + CELL / 2 - len(name) * 3, y + CELL - 22, name)
+                meta = split(rec, "|")[2]
+                syscall win_set_color(150, 150, 158)
+                syscall win_text(x + CELL / 2 - len(meta) * 3, y + CELL - 8, meta)
+                cells = cells + 1
+            }
+        }
+        i = i + 1
+    }
+    return 0
+}
+
+event fn on_click(ev: str) {
+    x = atoi(split(ev, " ")[1])
+    y = atoi(split(ev, " ")[2])
+    if (x >= PAD && y >= PAD + TOP) {
+        col = (x - PAD) / (CELL + GAP)
+        row = (y - PAD - TOP) / (CELL + GAP)
+        idx = row * cols + col
+        list = split(syscall win_app_list(), "\n")
+        n = len(list)
+        cells = 0
+        found = ""
+        i = 0
+        while (i < n) {
+            rec = list[i]
+            if (len(rec) > 0) {
+                id = split(rec, "|")[0]
+                if (id != "appmgr") {
+                    if (cells == idx) { found = id }
+                    cells = cells + 1
+                }
+            }
+            i = i + 1
+        }
+        if (len(found) > 0) { syscall win_app_launch(found) }
+    }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

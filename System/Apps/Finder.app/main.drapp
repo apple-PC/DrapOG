@@ -1,0 +1,318 @@
+// Finder —— 文件管理器（DrapLang 自举版，L9·D 阶段示范）
+// 工具栏：上级 / 刷新 / 新文件夹 / 新文件 / 删除 / 打开；地址栏显示当前路径（命名态可输入新名）；
+// 列表：单击选中，回车或「打开」进入目录 / 预览文件（fs_read 文本预览）；删除走 win_trash（可还原）；
+// 进入 /System 需授权（权限弹窗）；无双击事件，故以「单击选中 + 回车/打开」替代原 JS 双击进入。
+entry fn main() -> i32 {
+    let win = syscall win_create("Finder", 600, 440)
+    let W = 0
+    let H = 0
+    let cwd = "/Users/guest"
+    let items = [""]
+    let sel = -1
+    let naming = 0
+    let namingKind = "dir"
+    let namingVal = ""
+    let viewerName = ""
+    let viewerContent = 0
+    let viewerScroll = 0
+    let permTarget = ""
+    let sysAccess = 0
+    let status = ""
+    let i = 0
+    let n = 0
+    let name = ""
+    let base = ""
+    let isDir = 0
+    let target = ""
+    let reader = 0
+    let x = 0
+    let y = 0
+    let id = ""
+    let idx = 0
+    let j = 0
+    let lines = [""]
+    let total = 0
+    let vis = 0
+    let start = 0
+    let c = ""
+    let v = ""
+    let bx = 0
+    let by = 0
+    let bw = 0
+    let bh = 0
+    let t = ""
+    let booted = 0
+}
+
+event fn on_paint() {
+    if (booted == 0) {
+        booted = 1
+        t = syscall win_get_open_path()
+        if (len(t) > 0) { cwd = t; if (substr(t, 0, 8) == "/System") { sysAccess = 1 } }
+    }
+    W = syscall win_w()
+    H = syscall win_h()
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    // 工具栏
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 0, W, 38)
+    syscall win_button("上级", 8, 4, 60, 30)
+    syscall win_button("刷新", 74, 4, 60, 30)
+    syscall win_button("新文件夹", 140, 4, 60, 30)
+    syscall win_button("新文件", 206, 4, 60, 30)
+    syscall win_button("删除", 272, 4, 60, 30)
+    syscall win_button("打开", 338, 4, 60, 30)
+    // 地址栏
+    syscall win_set_color(30, 30, 36)
+    syscall win_fill_rect(0, 38, W, 26)
+    syscall win_theme(1)
+    syscall win_set_font(13)
+    if (naming == 1) {
+        if (namingKind == "dir") { c = "新建文件夹: " } else { c = "新建文件: " }
+        syscall win_text(10, 41, c + namingVal)
+        syscall win_set_color(255, 255, 255)
+        syscall win_fill_rect(10 + (len(c) + len(namingVal)) * 8, 41, 2, 16)
+    } else {
+        syscall win_text(12, 41, cwd)
+    }
+    // 列表
+    items = split(syscall fs_ls(cwd), "\n")
+    n = len(items)
+    i = 0
+    while (i < n) {
+        name = items[i]
+        if (len(name) > 0) {
+            if (i == sel) { syscall win_theme(4); syscall win_fill_rect(0, 64 + i * 28, W, 28) }
+            isDir = 0
+            if (substr(name, len(name) - 1, 1) == "/") { isDir = 1 }
+            if (isDir == 1) { syscall win_set_color(10, 132, 255) }
+            else { syscall win_set_color(150, 150, 158) }
+            syscall win_fill_rect(14, 64 + i * 28 + 7, 14, 14)
+            syscall win_theme(1)
+            syscall win_set_font(13)
+            syscall win_text(38, 64 + i * 28 + 4, name)
+        }
+        i = i + 1
+    }
+    // 状态栏（显式 status 优先于默认提示，确保「系统目录受保护」等提示能显示）
+    syscall win_set_color(26, 26, 30)
+    syscall win_fill_rect(0, H - 22, W, 22)
+    syscall win_theme(1)
+    syscall win_set_font(11)
+    if (naming == 1) { syscall win_text(10, H - 17, "回车确认 · Esc 取消") }
+    else if (status != "") { syscall win_text(10, H - 17, status) }
+    else if (permTarget != "") { syscall win_text(10, H - 17, "需要权限") }
+    else if (sysAccess == 1) { syscall win_text(10, H - 17, "已授权系统目录") }
+    else { syscall win_text(10, H - 17, itoa(n) + " 项") }
+    // 权限弹窗
+    if (permTarget != "") {
+        syscall win_set_color(0, 0, 0)
+        syscall win_fill_rect(0, 0, W, H)
+        bx = (W - 280) / 2
+        by = (H - 140) / 2
+        syscall win_set_color(40, 40, 46)
+        syscall win_fill_rect(bx, by, 280, 140)
+        syscall win_set_color(255, 212, 121)
+        syscall win_set_font(14)
+        syscall win_text(bx + 20, by + 20, "需要权限")
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        syscall win_text(bx + 20, by + 50, "进入系统目录需要授权：")
+        syscall win_set_color(120, 180, 255)
+        syscall win_text(bx + 20, by + 72, permTarget)
+        syscall win_button("允许", bx + 20, by + 94, 100, 34)
+        syscall win_button("拒绝", bx + 160, by + 94, 100, 34)
+    }
+    // 文件预览
+    if (viewerContent != 0) {
+        syscall win_set_color(0, 0, 0)
+        syscall win_fill_rect(0, 0, W, H)
+        bw = W - 48
+        if (bw > 420) { bw = 420 }
+        bh = H - 48
+        if (bh > 320) { bh = 320 }
+        bx = (W - bw) / 2
+        by = (H - bh) / 2
+        syscall win_set_color(32, 32, 38)
+        syscall win_fill_rect(bx, by, bw, bh)
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        syscall win_text(bx + 12, by + 12, viewerName)
+        syscall win_button("关闭", bx + bw - 86, by + 8, 78, 26)
+        lines = split(viewerContent, "\n")
+        total = len(lines)
+        vis = (bh - 56) / 16
+        start = viewerScroll
+        if (start < 0) { start = 0 }
+        if (total > vis) {
+            if (start > total - vis) { start = total - vis }
+        }
+        j = 0
+        while (j < vis && start + j < total) {
+            syscall win_set_font(12)
+            syscall win_text(bx + 12, by + 40 + j * 16, lines[start + j])
+            j = j + 1
+        }
+    }
+    return 0
+}
+
+event fn on_click(ev: str) {
+    id = split(ev, " ")[1]
+    // 预览优先：仅「关闭」有效
+    if (viewerContent != 0) {
+        if (id == "关闭") { viewerContent = 0; viewerName = ""; viewerScroll = 0 }
+        syscall win_invalidate(win)
+        return 0
+    }
+    // 权限弹窗
+    if (permTarget != "") {
+        if (id == "允许") {
+            t = permTarget; permTarget = ""; sysAccess = 1; cwd = t; sel = -1; status = ""
+        } else if (id == "拒绝") { permTarget = "" }
+        syscall win_invalidate(win)
+        return 0
+    }
+    // 命名态：点击取消
+    if (naming == 1) { naming = 0; syscall win_invalidate(win); return 0 }
+    // 工具栏
+    if (id == "上级") {
+        if (cwd != "/") { cwd = syscall fs_realpath(cwd, ".."); sel = -1; status = "" }
+        syscall win_invalidate(win); return 0
+    }
+    if (id == "刷新") { status = ""; syscall win_invalidate(win); return 0 }
+    if (id == "新文件夹") { naming = 1; namingKind = "dir"; namingVal = ""; syscall win_invalidate(win); return 0 }
+    if (id == "新文件") { naming = 1; namingKind = "file"; namingVal = ""; syscall win_invalidate(win); return 0 }
+    if (id == "删除") {
+        if (sel >= 0) {
+            items = split(syscall fs_ls(cwd), "\n")
+            name = items[sel]
+            if (len(name) > 0) {
+                base = name
+                if (substr(name, len(name) - 1, 1) == "/") { base = substr(name, 0, len(name) - 1) }
+                target = syscall fs_realpath(cwd, base)
+                if (substr(cwd, 0, 8) == "/System") { status = "系统目录受保护，禁止删除" }
+                else {
+                    v = syscall win_trash(target)
+                    if (v == 0) { status = "移入废纸篓失败" }
+                    else { status = "已移入废纸篓: " + name; sel = -1 }
+                }
+            }
+        } else { status = "请先选中一项" }
+        syscall win_invalidate(win); return 0
+    }
+    if (id == "打开") {
+        if (sel >= 0) {
+            items = split(syscall fs_ls(cwd), "\n")
+            name = items[sel]
+            if (len(name) > 0) {
+                isDir = 0
+                if (substr(name, len(name) - 1, 1) == "/") { isDir = 1 }
+                base = name
+                if (isDir == 1) { base = substr(name, 0, len(name) - 1) }
+                target = syscall fs_realpath(cwd, base)
+                if (isDir == 1) {
+                    if (substr(target, 0, 8) == "/System" && sysAccess == 0) { permTarget = target }
+                    else { cwd = target; sel = -1; status = "" }
+                } else {
+                    viewerName = base
+                    reader = syscall fs_read(target)
+                    if (reader != 0) { viewerContent = reader; viewerScroll = 0 }
+                    else { status = "无法读取: " + base }
+                }
+            }
+        }
+        syscall win_invalidate(win); return 0
+    }
+    // 列表单击选中
+    x = atoi(split(ev, " ")[1])
+    y = atoi(split(ev, " ")[2])
+    if (y >= 64) {
+        idx = (y - 64) / 28
+        items = split(syscall fs_ls(cwd), "\n")
+        if (idx >= 0 && idx < len(items) && len(items[idx]) > 0) { sel = idx }
+        else { sel = -1 }
+        status = ""
+    }
+    syscall win_invalidate(win)
+    return 0
+}
+
+event fn on_key(ev: str) {
+    // 预览
+    if (viewerContent != 0) {
+        if (ev == "key Escape") { viewerContent = 0; viewerName = ""; viewerScroll = 0 }
+        else if (ev == "key Enter") { viewerContent = 0; viewerName = ""; viewerScroll = 0 }
+        else if (ev == "key ArrowDown") { viewerScroll = viewerScroll + 1 }
+        else if (ev == "key ArrowUp") {
+            viewerScroll = viewerScroll - 1
+            if (viewerScroll < 0) { viewerScroll = 0 }
+        }
+        syscall win_invalidate(win); return 0
+    }
+    // 权限
+    if (permTarget != "") {
+        c = substr(ev, 4)
+        if (ev == "key Enter" || ev == "key " || c == "y" || c == "Y") {
+            t = permTarget; permTarget = ""; sysAccess = 1; cwd = t; sel = -1; status = ""
+        } else if (ev == "key Escape" || c == "n" || c == "N") { permTarget = "" }
+        syscall win_invalidate(win); return 0
+    }
+    // 命名
+    if (naming == 1) {
+        if (ev == "key Enter") {
+            v = namingVal
+            if (len(v) > 0) {
+                target = syscall fs_realpath(cwd, v)
+                if (namingKind == "dir") { syscall fs_mkdir(target) }
+                else { syscall fs_write(target, "") }
+                status = "已创建 " + v
+            }
+            naming = 0
+        } else if (ev == "key Escape") { naming = 0 }
+        else if (ev == "key Backspace") { namingVal = substr(namingVal, 0, len(namingVal) - 1) }
+        else {
+            c = substr(ev, 4)
+            if (len(c) == 1) { namingVal = namingVal + c }
+        }
+        syscall win_invalidate(win); return 0
+    }
+    // 常规
+    if (ev == "key ArrowUp") { if (sel > 0) { sel = sel - 1 } }
+    else if (ev == "key ArrowDown") {
+        items = split(syscall fs_ls(cwd), "\n")
+        if (sel < len(items) - 1) { sel = sel + 1 }
+    }
+    else if (ev == "key Enter") {
+        if (sel >= 0) {
+            items = split(syscall fs_ls(cwd), "\n")
+            name = items[sel]
+            if (len(name) > 0) {
+                isDir = 0
+                if (substr(name, len(name) - 1, 1) == "/") { isDir = 1 }
+                base = name
+                if (isDir == 1) { base = substr(name, 0, len(name) - 1) }
+                target = syscall fs_realpath(cwd, base)
+                if (isDir == 1) {
+                    if (substr(target, 0, 8) == "/System" && sysAccess == 0) { permTarget = target }
+                    else { cwd = target; sel = -1; status = "" }
+                } else {
+                    viewerName = base
+                    reader = syscall fs_read(target)
+                    if (reader != 0) { viewerContent = reader; viewerScroll = 0 }
+                    else { status = "无法读取: " + base }
+                }
+            }
+        }
+    }
+    else if (ev == "key Backspace") {
+        if (cwd != "/") { cwd = syscall fs_realpath(cwd, ".."); sel = -1; status = "" }
+    }
+    syscall win_invalidate(win)
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}

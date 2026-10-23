@@ -1,0 +1,10 @@
+{
+  "id": "about",
+  "name": "关于本机",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "关于本机（DrapLang 自举版）",
+  "category": "system"
+}

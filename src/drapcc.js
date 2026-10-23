@@ -59,7 +59,14 @@ const SYS_TABLE = {
   'win_open_finder':    0x59, // 在 Finder 打开路径：win_open_finder(path)
   'win_set_softkeyboard':0x5a, // 切换软键盘：win_set_softkeyboard(0|1)
   'win_get_theme':      0x5b, // 读取当前主题：返回 0=macos 1=windows（设置 App 启动高亮用）
-  'win_get_softkeyboard':0x5c, // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
+  'win_get_softkeyboard':0x5c,
+  'win_get_open_path':  0x86, // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
+  // 应用注册表 / 宿主桥接（DrapLang 枚举/启动应用、执行命令、绘制图标、移入废纸篓）
+  'win_app_list':       0x80, // 枚举已注册应用：win_app_list() → 每行 "id|name|category"
+  'win_app_launch':     0x81, // 启动应用：win_app_launch(id)
+  'win_shell_exec':     0x82, // 执行宿主命令：win_shell_exec(line) → 输出文本
+  'win_app_icon':       0x83, // 绘制应用图标：win_app_icon(id, x, y, size)
+  'win_trash':          0x85, // 移入废纸篓：win_trash(path)
   // 进程参数（CLI 工具读取命令行）
   'args_count': 0x60,
   'args_get':   0x61,
@@ -159,6 +166,12 @@ const SYS_RET = {
   'win_input_get':  { kind: 'prim', name: 'str' },
   'win_input':      { kind: 'prim', name: 'i32' },
   'win_set_input':  { kind: 'prim', name: 'i32' },
+  'win_app_list':        { kind: 'prim', name: 'str' },
+  'win_app_launch':      { kind: 'prim', name: 'i32' },
+  'win_shell_exec':      { kind: 'prim', name: 'str' },
+  'win_app_icon':        { kind: 'prim', name: 'i32' },
+  'win_trash':           { kind: 'prim', name: 'i32' },
+  'win_get_open_path':    { kind: 'prim', name: 'str' },
   'args_count': { kind: 'prim', name: 'i32' },
   'args_get':    { kind: 'prim', name: 'str' },
 };
@@ -214,6 +227,12 @@ const SYS_ARGS = {
   'win_set_softkeyboard': 1,
   'win_get_theme':       0,
   'win_get_softkeyboard': 0,
+  'win_app_list':         0,
+  'win_app_launch':       1,
+  'win_shell_exec':       1,
+  'win_app_icon':         4,
+  'win_trash':            1,
+  'win_get_open_path':     0,
   'args_count': 0,
   'args_get':   1,
 };

@@ -119,7 +119,8 @@ export const drapAppBridge = {
 };
 
 // 启动一个「已编译」的 DrapLang GUI 程序（program = {instructions, strings}）：建 VM+sys → 跑事件循环
-export function launchDrapAppProgram(wm, vfs, program) {
+// openPath：可选初始打开路径（openFinderAt 透传），写入窗口状态 __openPath 供 win_get_open_path 读取
+export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath = null) {
   const vm = new VM();
   vm.load(program);
   const sys = new DrapSYS({
@@ -129,6 +130,8 @@ export function launchDrapAppProgram(wm, vfs, program) {
     onWinCreate: ({ title, w, h }) => {
       const win = wm.createWindow({ title, w, h, appId: '__drapapp__' });
       win.__sys = sys;
+      const st = sys.drapWins.get(win.id);
+      if (st) st.__openPath = openPath || '';
       return win.id;
     },
     onWinClose: (winId) => { wm.closeWindow(winId); },
@@ -138,6 +141,8 @@ export function launchDrapAppProgram(wm, vfs, program) {
       onSetSoftKeyboard: (on) => { if (wm) wm.softKeyboard.open = !!on; if (wm && typeof wm.savePrefs === 'function') wm.savePrefs(); },
       onGetThemeName: () => (wm && wm.theme) || 'macos',
       onGetSoftKeyboard: () => !!(wm && wm.softKeyboard && wm.softKeyboard.open),
+      registry,
+      wm,
   });
   vm.sys = sys;
   // 跑 VM：内部事件循环会在 win_get_event 处阻塞，由真实事件唤醒
@@ -147,6 +152,7 @@ export function launchDrapAppProgram(wm, vfs, program) {
 
 // 启动一个 DrapLang 编写的 GUI 应用：编译源 → 建 VM+sys → 跑事件循环
 // opts.modules: { name: source } —— 供 app 内的 `import "name"` 文件级模块解析
+// opts.registry: AppRegistry 实例（供 win_app_* 系统调用枚举/启动应用）
 export function launchDrapApp(wm, vfs, source, opts = {}) {
   let program;
   try {
@@ -155,7 +161,7 @@ export function launchDrapApp(wm, vfs, source, opts = {}) {
     console.error('DrapLang 应用编译失败', err);
     return null;
   }
-  return launchDrapAppProgram(wm, vfs, program);
+  return launchDrapAppProgram(wm, vfs, program, opts.registry || null, opts.openPath || null);
 }
 
 // 从 URL 拉取 DrapLang 源码并启动（dock / 注册表 启动 gui 型 .app 用）

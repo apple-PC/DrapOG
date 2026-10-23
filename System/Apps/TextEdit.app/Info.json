@@ -1,0 +1,10 @@
+{
+  "id": "edit",
+  "name": "TextEdit",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "TextEdit 文本编辑器（DrapLang 自举版）",
+  "category": "productivity"
+}

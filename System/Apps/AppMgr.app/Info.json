@@ -1,0 +1,10 @@
+{
+  "id": "appmgr",
+  "name": "应用",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "应用管理（DrapLang 自举版：枚举并启动应用）",
+  "category": "system"
+}

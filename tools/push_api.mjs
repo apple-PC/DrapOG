@@ -62,10 +62,15 @@ if (localBaseTree !== remoteTreeSha) {
 
 if (!DOIT) { console.log('\n[DRY-RUN] 基准一致，未更新 ref。DOIT=1 才真正推送。'); process.exit(0); }
 
-// 为每个改动文件创建 blob
+// 为每个改动文件创建 blob（删除的文件以 sha:null 从 tree 中移除）
 const entries = [];
 for (const f of changed) {
-  const content = readFileSync(f);
+  let content = null;
+  try { content = readFileSync(f); } catch (e) { content = null; }
+  if (content === null) {
+    entries.push({ path: f, mode: '100644', type: 'blob', sha: null });   // 删除
+    continue;
+  }
   const b64 = content.toString('base64');
   const blob = await api('POST', `/repos/${REPO}/git/blobs`, { content: b64, encoding: 'base64' });
   entries.push({ path: f, mode: '100644', type: 'blob', sha: blob.sha });
