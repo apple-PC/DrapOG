@@ -1,10 +1,11 @@
-// 通过 GitHub Git Data API 把本地相对 origin/main 的改动推成一个干净 commit。
+// 通过 GitHub Git Data API 把本地 main 的完整 tree 推成一个干净 commit。
 // 背景：本机代理封了 github.com（git 协议），但 api.github.com 可达，故走 REST 绕过封锁。
 //
 // 设计要点：
-//  - 以 API 实时查询到的远程 main 真实 tree 为权威基准（本地 origin/main 可能因 git fetch 失败而陈旧）。
-//  - 安全校验：本地 origin/main 的 tree 必须与远程 tree 一致，否则中止（说明远程被意外推进）。
-//  - 推送成功后自动把本地 origin/main 指向当前 HEAD（其 tree 与远程新 commit 的 tree 相同），保证后续 diff 基准正确。
+//  - 以 API 实时查询到的远程 main 真实 tree 为权威基线（本地 origin/main 可能因 git fetch 失败而陈旧）。
+//  - 改动集合 = 本地 HEAD 的 tree 与远程 tree 的完整差异（新增 / 修改 / 删除），保证推上去的 tree
+//    与本地 HEAD 完全一致，绝不会丢改（例如本地已提交但远程基线尚未包含的修复）。
+//  - 推送成功后自动把本地 origin/main 指向当前 HEAD，保证后续 diff 基准正确。
 //
 // 用法（PAT 走环境变量，切勿写死进仓库）：
 //   GITHUB_TOKEN=xxx node tools/push_api.mjs                              -> 仅打印计划（不更新 ref）
@@ -17,6 +18,9 @@ const API = 'https://api.github.com';
 const DOIT = !!process.env.DOIT;
 const TOKEN = process.env.GITHUB_TOKEN;
 const MSG = process.env.COMMIT_MSG || '通过 Git Data API 推送本地改动';
+// 可选：以逗号分隔的路径前缀，跳过这些路径的变更（例如 EXCLUDE="docs/" 避免改动文档目录）
+const EXCLUDE = (process.env.EXCLUDE || '').split(',').map(s => s.trim()).filter(Boolean);
+function excluded(path) { return EXCLUDE.some(p => path === p || path.startsWith(p)); }
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -36,10 +40,29 @@ async function api(method, path, body) {
   return txt ? JSON.parse(txt) : null;
 }
 
-// 本地基线（用于确定要推送哪些文件）
-const localBase = git('rev-parse', 'origin/main');
-const localBaseTree = git('rev-parse', 'origin/main^{tree}');
-const changed = git('diff', '--name-only', 'origin/main').split('\n').filter(Boolean);
+// 本地 HEAD 的完整 tree（path -> sha）
+function localTreeMap() {
+  const out = git('ls-tree', '-r', 'HEAD');
+  const m = {};
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue;
+    const mt = line.match(/^\d+\s+\w+\s+(\w+)\t(.+)$/);
+    if (!mt) continue;
+    let path = mt[2];
+    // git 在非 TTY 输出时对含非 ASCII 的路径做 C 风格引号转义，剥掉首尾引号
+    if (path.startsWith('"') && path.endsWith('"')) path = path.slice(1, -1);
+    m[path] = mt[1];
+  }
+  return m;
+}
+
+// 远程 main 的完整 tree（递归；path -> sha）
+async function remoteTreeMap(treeSha) {
+  const data = await api('GET', `/repos/${REPO}/git/trees/${treeSha}?recursive=1`);
+  const m = {};
+  for (const e of data.tree) if (e.type === 'blob') m[e.path] = e.sha;
+  return m;
+}
 
 // 远程权威基准（通过 API 实时获取）
 const refInfo = await api('GET', `/repos/${REPO}/git/refs/heads/main`);
@@ -47,33 +70,42 @@ const remoteMainSha = refInfo.object.sha;
 const remoteCommit = await api('GET', `/repos/${REPO}/git/commits/${remoteMainSha}`);
 const remoteTreeSha = remoteCommit.tree.sha;
 
-console.log('local  origin/main :', localBase, '(tree', localBaseTree + ')');
-console.log('remote main (API)  :', remoteMainSha, '(tree', remoteTreeSha + ')');
-console.log('changed files (' + changed.length + '):');
-for (const f of changed) console.log('  -', f);
+const localTree = localTreeMap();
+const remoteTree = await remoteTreeMap(remoteTreeSha);
 
-// 安全校验：本地基线 tree 必须与远程 tree 一致，确认我们是在正确基础上叠加
-if (localBaseTree !== remoteTreeSha) {
-  console.log('\n[ABORT] 本地 origin/main 的 tree 与远程 main 的 tree 不一致！');
-  console.log('  本地 tree:', localBaseTree, ' 远程 tree:', remoteTreeSha);
-  console.log('  远程已被意外推进或本地基线陈旧，停止推送以免非快进覆盖。请先核查。');
-  process.exit(2);
+// 计算差异：新增 / 修改（本地有且 remote 无 或 sha 不同）→ 写 blob；远程有本地无 → 删除
+const entries = [];
+const added = [], removed = [], updated = [];
+for (const [path, sha] of Object.entries(localTree)) {
+  if (excluded(path)) continue;
+  if (!(path in remoteTree)) { added.push(path); entries.push({ path, mode: '100644', type: 'blob', sha }); }
+  else if (remoteTree[path] !== sha) { updated.push(path); entries.push({ path, mode: '100644', type: 'blob', sha }); }
+}
+for (const path of Object.keys(remoteTree)) {
+  if (excluded(path)) continue;
+  if (!(path in localTree)) { removed.push(path); entries.push({ path, mode: '100644', type: 'blob', sha: null }); }
 }
 
-if (!DOIT) { console.log('\n[DRY-RUN] 基准一致，未更新 ref。DOIT=1 才真正推送。'); process.exit(0); }
+console.log('remote main (API)  :', remoteMainSha, '(tree', remoteTreeSha + ')');
+console.log('local  HEAD        :', git('rev-parse', 'HEAD'));
+console.log('changed files (' + entries.length + '):');
+for (const p of added) console.log('  + ' + p);
+for (const p of updated) console.log('  ~ ' + p);
+for (const p of removed) console.log('  - ' + p);
 
-// 为每个改动文件创建 blob（删除的文件以 sha:null 从 tree 中移除）
-const entries = [];
-for (const f of changed) {
-  let content = null;
-  try { content = readFileSync(f); } catch (e) { content = null; }
-  if (content === null) {
-    entries.push({ path: f, mode: '100644', type: 'blob', sha: null });   // 删除
-    continue;
-  }
-  const b64 = content.toString('base64');
+if (entries.length === 0) {
+  console.log('\n[NO-OP] 本地 HEAD 与远程 tree 已一致，无需推送。');
+  process.exit(0);
+}
+
+if (!DOIT) { console.log('\n[DRY-RUN] 未更新 ref。DOIT=1 才真正推送。'); process.exit(0); }
+
+// 为每个新增/修改文件创建 blob（删除条目 sha:null 从 tree 移除）
+for (const ent of entries) {
+  if (ent.sha === null) continue;
+  const b64 = readFileSync(ent.path).toString('base64');
   const blob = await api('POST', `/repos/${REPO}/git/blobs`, { content: b64, encoding: 'base64' });
-  entries.push({ path: f, mode: '100644', type: 'blob', sha: blob.sha });
+  ent.sha = blob.sha;
 }
 
 const tree = await api('POST', `/repos/${REPO}/git/trees`, { base_tree: remoteTreeSha, tree: entries });

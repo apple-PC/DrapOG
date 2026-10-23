@@ -1,9 +1,7 @@
 {
-  "bootMode": "cmd",
-  "timeout": 2,
-  "quickPOST": false,
+  "bootMode": "auto",
+  "timeout": 5,
+  "quickPOST": true,
   "bootLogo": true,
-  "secureBoot": false,
-  "theme": "macos",
-  "softKeyboard": false
+  "secureBoot": false
 }

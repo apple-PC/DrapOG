@@ -8,6 +8,7 @@
 import { idbGet, idbSet } from './drapog.idb.js';
 import { appIcon } from './drapog.registry.js';
 import { drawAppleLogo } from './drapog.icon.js';
+import { BUILTIN_ICONS } from './drapog.icons.js';
 
 /** 规范化主题标识：'windows'/'win' → windows，其余 → macos */
 export function normalizeTheme(t) {
@@ -689,7 +690,9 @@ export class WindowManager {
               | {t:'p',pts:[[x,y]...],c,close} 多边形 | {t:'t',s,x,y,size,c,bold} 文字 */
   iconSpecOf(id) {
     const rec = this.registry && this.registry.apps && this.registry.apps.get(id);
-    return (rec && rec.iconSpec) || null;
+    // 优先用注册表记录的 iconSpec（挂载磁盘时由 scan 从 icon.json 读取）；
+    // 内存/ Pages 模式无磁盘时回退到内建图标表，保证永远渲染手绘 macOS 图标（零网络依赖）。
+    return (rec && rec.iconSpec) || (BUILTIN_ICONS[id] || null);
   }
 
   // 在 (x, y, size) 画 macOS 风格 squircle 图标；有规格返回 true，无规格返回 false（调用方退回旧渲染）

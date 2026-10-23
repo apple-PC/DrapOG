@@ -106,16 +106,9 @@ export async function startGUI(opts = {}) {
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现，含各包 icon.json 手绘图标）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
-    // 内存模式下，.app 包的手绘图标（icon.json）与启动并发预取；挂载模式由 registry.scan 读取。
-    // 关键：await 全部就绪后再启动窗口与渲染循环，确保首帧即显示手绘图标，不再退回字母/emoji。
-    await Promise.all(registry.all().map(async (rec) => {
-      if (!rec || !rec.file || !rec.baseUrl) return;
-      try {
-        const iconUrl = new URL(rec.file.replace(/[^/]+$/, '') + 'icon.json', rec.baseUrl).href;
-        const r = await fetch(iconUrl);
-        if (r.ok) { const spec = await r.json(); if (spec) rec.iconSpec = spec; }
-      } catch (e) { console.warn('icon.json 预取失败（退回字母）', rec.id, e.message); }
-    }));
+    // 手绘图标：内存/ Pages 模式由 wm.iconSpecOf 直接回退到 src/drapog.icons.js 内建表（零网络依赖，
+    // 避免国内访问 GitHub Pages 偶发超时导致退回字母）；挂载磁盘时 scan 会读取各包 icon.json 覆盖。
+    // 不再运行时 fetch icon.json。
 
     wm.registerApp('__drapapp__', drapAppBridge);   // DrapLang GUI 应用的宿主桥接（所有 .app 经此渲染）
 
@@ -132,12 +125,17 @@ export async function startGUI(opts = {}) {
 
     function onMouseDown(e) {
       const p = pos(e);
+      // 总是先把事件交给 WM：WM 内部处理「桌面图标单击选中 / 双击启动」与窗口选择/拖拽。
+      // （之前 gui 层自己拦截双击，会把桌面图标的第二击吞掉，导致双击打不开 —— 现已下放给 WM。）
+      wm.onMouseDown(p.x, p.y);
+
+      // 仅在窗口内容区双击时，额外派发 app.onDoubleClick（少数应用用，如文本选择）；桌面双击由 WM 处理。
       const now = Date.now();
       const isDouble = now - lastDown.t < 350
                     && Math.abs(p.x - lastDown.x) < 4
                     && Math.abs(p.y - lastDown.y) < 4;
-
       if (isDouble) {
+        lastDown.t = 0;
         const w = wm.hitTest(p.x, p.y);
         if (w && wm.hitContent(w, p.x, p.y)) {
           const app = wm.getApp(w.appId);
@@ -146,10 +144,8 @@ export async function startGUI(opts = {}) {
             catch (err) { console.error(err); }
           }
         }
-        lastDown.t = 0;
       } else {
         lastDown = { t: now, x: p.x, y: p.y };
-        wm.onMouseDown(p.x, p.y);
       }
       screen.style.cursor = wm.getCursor(p.x, p.y);
     }
