@@ -7,6 +7,6 @@
     "test": "node tools/run-tests.mjs",
     "build": "node tools/build.mjs",
     "bump": "node tools/bump-version.mjs",
-    "serve": "node _dev/serve.py"
+    "serve": "python3 _dev/serve.py"
   }
 }
