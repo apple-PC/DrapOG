@@ -7,6 +7,7 @@
 
 import { idbGet, idbSet } from './drapog.idb.js';
 import { appIcon } from './drapog.registry.js';
+import { drawAppleLogo } from './drapog.icon.js';
 
 /** 规范化主题标识：'windows'/'win' → windows，其余 → macos */
 export function normalizeTheme(t) {
@@ -1309,10 +1310,8 @@ export class WindowManager {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
 
-    // Apple 标志（点击弹主菜单）
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
-    ctx.font = '15px -apple-system, sans-serif';
-    ctx.fillText('', 14, cy + 1);
+    // Apple 标志（手绘路径，点击弹主菜单）
+    drawAppleLogo(ctx, 21, cy, 17);
 
     // 焦点应用名（加粗；无焦点窗口时显示访达）
     ctx.font = '600 13.5px -apple-system, sans-serif';
