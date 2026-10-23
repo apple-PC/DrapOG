@@ -1313,7 +1313,8 @@ export class WindowManager {
     // Apple 标志（手绘路径，点击弹主菜单）
     drawAppleLogo(ctx, 21, cy, 17);
 
-    // 焦点应用名（加粗；无焦点窗口时显示访达）
+    // 焦点应用名（加粗；无焦点窗口时显示访达）—— 白色，覆盖菜单栏深色底
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
     ctx.font = '600 13.5px -apple-system, sans-serif';
     ctx.fillText(L.appName, L.appNameX, cy + 0.5);
 

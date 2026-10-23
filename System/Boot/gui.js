@@ -52,7 +52,7 @@ export async function startGUI(opts = {}) {
   const wm = new WindowManager(screen, { theme: opts.theme, themeConfigs });
   await wm.loadPrefs();   // 应用已保存的主题/软键盘偏好（IndexedDB，刷新后恢复）再建窗口
 
-  return new Promise(resolve => {
+  return new Promise(async (resolve) => {
     // 应用注册表（L4：整合 draplang 工具 + 制定 .app 格式）
     const registry = new AppRegistry();
     wm.vfs = vfs;
@@ -81,39 +81,41 @@ export async function startGUI(opts = {}) {
       file: '../Apps/Hello.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang CLI 示例', category: 'tools' });
     // L5：DrapLang 计算器（GUI 应用，import 复用 calcutil.drapp 模块 —— 演示「app 调用 drapp」）
-    registry.addDrap('calc',     { name: 'Calc 计算器',  icon: '🧮', type: 'gui',
+    registry.addDrap('calc',     { name: 'Calc 计算器',  icon: 'C', type: 'gui',
       file: '../Apps/Calc.app/main.drapp', baseUrl: import.meta.url, modules: ['calcutil'],
       version: '1.0', author: 'DrapOG', description: 'DrapLang 计算器（win_gui + import calcutil）', category: 'utilities' });
     // L5：进制转换器（GUI 应用，import 复用 baseconv.drapp 模块 —— app 调用 drapp）
-    registry.addDrap('conv',     { name: 'Conv 进制转换', icon: '🔟', type: 'gui',
+    registry.addDrap('conv',     { name: 'Conv 进制转换', icon: '2', type: 'gui',
       file: '../Apps/Conv.app/main.drapp', baseUrl: import.meta.url, modules: ['baseconv'],
       version: '1.0', author: 'DrapOG', description: '十进制转二/八/十六进制（win_gui + import baseconv）', category: 'utilities' });
     // L6：DrapLang 文档编辑器（办公级第一块拼图；多行文本编辑 + 打开/保存任意路径）
     //     用 DrapLang 自举的「真编辑器」，作为所有 drapp 的范例；也演示 win_mono 等宽字体 + 输入框预填。
-    registry.addDrap('docedit',  { name: 'DocEdit 文档', icon: '📝', type: 'gui',
+    registry.addDrap('docedit',  { name: 'DocEdit 文档', icon: 'D', type: 'gui',
       file: '../Apps/DocEdit.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: 'DrapLang 文档编辑器（多行编辑/打开/保存）', category: 'productivity' });
     // L7·D：把设置 / 废纸篓 / 此电脑从 JS 宿主应用改写为 DrapLang 自举应用
-    registry.addDrap('settings', { name: '设置',         icon: '⚙',  type: 'gui',
+    registry.addDrap('settings', { name: '设置',         icon: 'S',  type: 'gui',
       file: '../Apps/Settings.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '系统设置（主题切换 / 软键盘）', category: 'system' });
-    registry.addDrap('trash',    { name: '废纸篓',       icon: '🗑',  type: 'gui',
+    registry.addDrap('trash',    { name: '废纸篓',       icon: 'T',  type: 'gui',
       file: '../Apps/Trash.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '废纸篓（还原 / 清空）', category: 'system' });
-    registry.addDrap('thispc',   { name: '此电脑',       icon: '💻',  type: 'gui',
+    registry.addDrap('thispc',   { name: '此电脑',       icon: 'P',  type: 'gui',
       file: '../Apps/ThisPC.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '此电脑（卷与目录 / 打开 Finder）', category: 'system' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现，含各包 icon.json 手绘图标）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
-    // 内存模式下，.app 包的手绘图标（icon.json）经 fetch 异步加载（挂载模式由 scan 读取）；
-    // 加载完成前的帧退回 emoji/字母渲染，画布每帧重绘故加载后自动生效
-    for (const id of ['hello', 'calc', 'conv', 'docedit', 'settings', 'trash', 'thispc', 'finder', 'terminal', 'edit', 'about', 'appmgr']) {
-      const rec = registry.get(id);
-      if (!rec || !rec.file || !rec.baseUrl) continue;
-      const iconUrl = new URL(rec.file.replace(/[^/]+$/, '') + 'icon.json', rec.baseUrl).href;
-      fetch(iconUrl).then(r => (r.ok ? r.json() : null)).then(spec => { if (spec) rec.iconSpec = spec; }).catch(() => {});
-    }
+    // 内存模式下，.app 包的手绘图标（icon.json）与启动并发预取；挂载模式由 registry.scan 读取。
+    // 关键：await 全部就绪后再启动窗口与渲染循环，确保首帧即显示手绘图标，不再退回字母/emoji。
+    await Promise.all(registry.all().map(async (rec) => {
+      if (!rec || !rec.file || !rec.baseUrl) return;
+      try {
+        const iconUrl = new URL(rec.file.replace(/[^/]+$/, '') + 'icon.json', rec.baseUrl).href;
+        const r = await fetch(iconUrl);
+        if (r.ok) { const spec = await r.json(); if (spec) rec.iconSpec = spec; }
+      } catch (e) { console.warn('icon.json 预取失败（退回字母）', rec.id, e.message); }
+    }));
 
     wm.registerApp('__drapapp__', drapAppBridge);   // DrapLang GUI 应用的宿主桥接（所有 .app 经此渲染）
 
