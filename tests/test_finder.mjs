@@ -52,54 +52,59 @@ async function testFinder() {
   await vfs.write('/System/BIOS', 'BIOS v1');
   await vfs.write('/Users/guest/readme.txt', 'hello');
   const wm = makeWM();
-  const sys = launchDrapAppProgram(wm, vfs, compile('Finder'));
-  const win = wm.getWin(); const st = sys.drapWins.get(win.id);
+
+  // 统一用列表视图做确定性断言：点击「列表」按钮切换
+  const toList = async (sys, win) => { sys.injectWinEvent(win.id, 'click 列表'); await settle(); };
+  // 内容区选中第 i 行（列表视图行 y = TOOLBAR_H+8+i*30，文字在 +8；点 x=220 落在内容区且落在行内）
+  const selectRow = (sys, win, y) => sys.injectWinEvent(win.id, 'click 220 ' + (y + 10));
+
+  // A. 新建文件夹 My / 新建文本 a.txt（cwd=/Users/guest）
+  let sys = launchDrapAppProgram(wm, vfs, compile('Finder'));
+  let win = wm.getWin(); let st = sys.drapWins.get(win.id);
   await settle();
   ok(st.drawOps.length > 0, 'Finder 首帧已绘制');
-
-  // A. 新建文件夹 My（命名态逐字符）
+  await toList(sys, win);
   sys.injectWinEvent(win.id, 'click 新文件夹'); await settle();
   for (const ch of ['M','y']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
   sys.injectWinEvent(win.id, 'key Enter'); await settle();
   ok((await vfs.exists('/Users/guest/My')) === true, '新建文件夹 /Users/guest/My 已创建');
-
-  // B. 新建文本 a.txt
   sys.injectWinEvent(win.id, 'click 新文件'); await settle();
   for (const ch of ['a','.','t','x','t']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
   sys.injectWinEvent(win.id, 'key Enter'); await settle();
   ok((await vfs.exists('/Users/guest/a.txt')) === true, '新建文本 /Users/guest/a.txt 已创建');
 
-  // C. 上级 ×2 → /
-  sys.injectWinEvent(win.id, 'click 上级'); await settle();
-  sys.injectWinEvent(win.id, 'click 上级'); await settle();
+  // B. 以 openPath="/" 启动（sysAccess 仍为 0）→ /System 需权限；允许后进入；系统目录内禁止删除
+  sys = launchDrapAppProgram(wm, vfs, compile('Finder'), null, '/');
+  win = wm.getWin(); st = sys.drapWins.get(win.id);
+  await settle();
+  await toList(sys, win);
   const sysRowY = rowYOf(st, 'System');
   ok(sysRowY >= 0, '根目录列表含 /System');
-
-  // D. 进入 /System 需权限；允许后进入；系统目录内禁止删除
   if (sysRowY >= 0) {
-    sys.injectWinEvent(win.id, 'click 12 ' + (sysRowY + 10)); await settle();  // 选中 /System
+    selectRow(sys, win, sysRowY); await settle();
     sys.injectWinEvent(win.id, 'click 打开'); await settle();
     ok(texts(st).some(x => x === '需要权限'), '点击 /System「打开」弹出权限弹窗（显示「需要权限」）');
     sys.injectWinEvent(win.id, 'click 允许'); await settle();
     const biosY = rowYOf(st, 'BIOS');
     ok(biosY >= 0, '允许后进入 /System，列表含 BIOS');
     if (biosY >= 0) {
-      sys.injectWinEvent(win.id, 'click 12 ' + (biosY + 10)); await settle();  // 选中 BIOS
+      selectRow(sys, win, biosY); await settle();
       sys.injectWinEvent(win.id, 'click 删除'); await settle();
       ok(texts(st).some(x => x.includes('系统目录受保护')), '在 /System 内删除被拒，提示「系统目录受保护」');
     }
   }
 
-  // E. openPath 透传 + 文件预览
-  const sys2 = launchDrapAppProgram(wm, vfs, compile('Finder'), null, '/Users/guest');
-  const win2 = wm.getWin(); const st2 = sys2.drapWins.get(win2.id);
+  // C. openPath 透传 + 文件预览（cwd=/Users/guest，列表视图选中 readme.txt → 打开进入预览）
+  sys = launchDrapAppProgram(wm, vfs, compile('Finder'), null, '/Users/guest');
+  win = wm.getWin(); st = sys.drapWins.get(win.id);
   await settle();
-  const readmeY = rowYOf(st2, 'readme.txt');
+  await toList(sys, win);
+  const readmeY = rowYOf(st, 'readme.txt');
   ok(readmeY >= 0, 'openPath=/Users/guest 启动后列表含 readme.txt');
   if (readmeY >= 0) {
-    sys2.injectWinEvent(win2.id, 'click 12 ' + (readmeY + 10)); await settle();
-    sys2.injectWinEvent(win2.id, 'click 打开'); await settle();
-    ok(texts(st2).some(x => x === 'readme.txt'), '打开文本文件进入预览视图（标题显示 readme.txt）');
+    selectRow(sys, win, readmeY); await settle();
+    sys.injectWinEvent(win.id, 'click 打开'); await settle();
+    ok(texts(st).some(x => x === 'readme.txt'), '打开文本文件进入预览视图（标题显示 readme.txt）');
   }
 }
 

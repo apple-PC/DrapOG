@@ -31,6 +31,13 @@ function paletteArray(theme) {
   return [p.bg, p.fg, p.accent, p.toolbar, p.sel];
 }
 
+// 应用标题兜底表（仅当注册表尚未登记该 id 时使用；正常情况一律以 registry.name 为准）
+const TITLES = {
+  finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
+  conv: 'Conv', docedit: 'DocEdit', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
+  trash: '废纸篓', thispc: '此电脑',
+};
+
 export class WindowManager {
   constructor(canvas, opts = {}) {
     this.theme = normalizeTheme(opts.theme);
@@ -62,14 +69,9 @@ export class WindowManager {
     // 软键盘（移动端调用实体键盘用）
     this.softKeyboard = { open: false };
 
-    // dock 应用（图标统一为 id 前两字母；guidemo/paint 演示应用已移除）
-    const TITLES = {
-      finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
-      conv: 'Conv', docedit: 'DocEdit', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
-      trash: '废纸篓', thispc: '此电脑',
-    };
+    // dock/桌面 应用顺序（图标统一为 id 前两字母；guidemo/paint 演示应用已移除）
     this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'docedit', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc']
-      .map(id => ({ id, letter: appIcon(id), title: TITLES[id] }));
+      .map(id => ({ id, letter: appIcon(id), title: TITLES[id] || id }));
 
     this._appImpls = new Map();   // appId -> 实现
   }
@@ -337,16 +339,25 @@ export class WindowManager {
     // 点击非桌面图标处时清除桌面图标选中态（点空白桌面也会取消选中）
     this.selectedDesktopIconId = null;
 
-    // 主菜单打开：命中项则执行，否则关闭并吞掉本次点击
-    if (this.menu) { this.runMenuAction(this.hitMenu(x, y)); return; }
+    // 主菜单打开：命中项则执行；点击另一个菜单栏标签则切换；否则关闭并吞掉本次点击
+    if (this.menu) {
+      if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) {
+        const lbl = this.hitMenuBarLabel(x);
+        if (lbl) { this.openBarMenu(lbl); return; }
+      }
+      this.runMenuAction(this.hitMenu(x, y));
+      return;
+    }
 
     // 右键菜单打开：命中项则执行，否则关闭
     if (this.ctxMenu) { this.runContextAction(this.hitContextMenu(x, y)); return; }
 
-    // macOS：Apple 标志开主菜单；菜单栏其它区域（键盘按钮）
+    // macOS：Apple 标志开主菜单；app 名 / 文件/编辑/... 菜单栏标签点击打开下拉
     if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H) {
       if (this.hitAppleLogo(x, y)) { this.toggleMenu('apple'); return; }
-      if (this.hitMenuBar(x, y)) this.toggleSoftKeyboard();
+      const lbl = this.hitMenuBarLabel(x);
+      if (lbl) { this.openBarMenu(lbl); return; }
+      if (this.hitMenuBar(x, y)) this.toggleSoftKeyboard();  // 右侧键盘按钮
       return;   // 菜单栏区域不穿透到下方窗口
     }
 
@@ -480,7 +491,7 @@ export class WindowManager {
     if (this.dragState) return 'grabbing';
     if (this.locked || this.shutdown) return 'pointer';
     if (this.menu && this.hitMenu(x, y)) return 'pointer';
-    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H && (this.hitAppleLogo(x, y) || this.hitMenuBar(x, y))) return 'pointer';
+    if (this.T.topBar === 'menubar' && y < this.MENU_BAR_H && (this.hitAppleLogo(x, y) || this.hitMenuBar(x, y) || this.hitMenuBarLabel(x))) return 'pointer';
     if (this.softKeyboard.open && this.hitSoftKeyboard(x, y)) return 'pointer';
     if (this.T.bottomBar === 'dock') { if (this.hitDock(x, y)) return 'pointer'; }
     else { if (this.hitTaskbar(x, y)) return 'pointer'; }
@@ -609,7 +620,7 @@ export class WindowManager {
     if (impl && typeof impl.launch === 'function') { impl.launch(this); return; }
     // 无 WM 实现但注册表里有（DrapLang 应用：gui 交 WM、cli 跑终端）→ 统一经注册表启动
     if (!impl && this.registry && this.registry.get(app.id)) {
-      this.registry.launch(app.id, { wm: this, vfs: this.vfs || null })
+      this.registry.launch(app.id, { wm: this, vfs: this.vfs || null, openPath: app.openPath || null })
         .catch(e => console.error('应用启动失败', app.id, e));
       return;
     }
@@ -665,10 +676,11 @@ export class WindowManager {
     const perCol = Math.max(1, Math.floor(avail / (tile + gap + 20)));
     const cells = [];
     for (let i = 0; i < this.apps.length; i++) {
+      const a = this.apps[i];
       const col = Math.floor(i / perCol), row = i % perCol;
       const x = x0 + col * (tile + gap);
       const y = y0 + row * (tile + gap + 20);
-      cells.push({ x, y, tile, letter: this.apps[i].letter, title: this.apps[i].title, id: this.apps[i].id });
+      cells.push({ x, y, tile, letter: a.letter, title: this.appMeta(a.id).name, id: a.id });
     }
     return { cells };
   }
@@ -679,6 +691,14 @@ export class WindowManager {
     const icon = rec && rec.icon;
     if (icon && /[^\x00-\x7F]/.test(icon)) return icon;     // 含非 ASCII（emoji / ◆ 等）→ 用原图标
     return letter || (icon ? icon[0] : '?');                 // 否则用两字母 monogram
+  }
+
+  // 应用元数据：名称/字母统一从注册表取（单一真相源），硬 TITLES 仅兜底 —— 改名自动同步到桌面/Dock/菜单栏
+  appMeta(id) {
+    const rec = this.registry && this.registry.apps.get(id);
+    const name = (rec && rec.name) || TITLES[id] || id;
+    const letter = (rec && rec.icon && rec.icon.length === 1) ? rec.icon : appIcon(id);
+    return { name, letter };
   }
 
   /* ---------- 手绘应用图标（macOS 风格） ----------
@@ -1055,6 +1075,7 @@ export class WindowManager {
     const items = [
       { label: '关于本机', action: 'about' },
       { label: '系统设置...', action: 'settings' },
+      { label: '强制退出...', action: 'forcequit' },
       { sep: true },
       { label: '锁定屏幕', action: 'lock' },
       { label: '重新启动...', action: 'restart' },
@@ -1064,6 +1085,117 @@ export class WindowManager {
     let h = pad * 2;
     for (const it of items) h += it.sep ? 12 : rowH;
     return { x: 6, y: this.MENU_BAR_H, w, h, items, rowH, pad };
+  }
+
+  /* ---------- 菜单栏标签命中（app 名 / 文件/编辑/显示/前往/窗口/帮助） ---------- */
+  menuBarLabels(W) {
+    const L = this.menuBarLayout(W);
+    const ctx = this.ctx;
+    const labels = [];
+    ctx.font = '600 13.5px -apple-system, sans-serif';
+    const aw = ctx.measureText(L.appName).width + 18;
+    labels.push({ label: 'app', x: L.appNameX, w: aw });
+    ctx.font = '13.5px -apple-system, sans-serif';
+    let mx = L.appNameX + aw + 6;
+    for (const m of L.menus) {
+      const w = ctx.measureText(m).width + 22;
+      labels.push({ label: m, x: mx, w });
+      mx += w;
+    }
+    return labels;
+  }
+  hitMenuBarLabel(x) {
+    if (!this._mbLabels) return null;
+    for (const l of this._mbLabels) { if (x >= l.x && x < l.x + l.w) return l.label; }
+    return null;
+  }
+
+  /* ---------- 下拉菜单项（文件/编辑/显示/前往/窗口/帮助/app） ---------- */
+  barMenuItems(name) {
+    const focusWin = this.focusedId ? this.windows.find(w => w.id === this.focusedId) : null;
+    const an = focusWin ? this.appMeta(focusWin.appId).name : '应用';
+    switch (name) {
+      case 'app': return [
+        { label: '关于本机', action: 'about' },
+        { sep: true },
+        { label: '隐藏“' + an + '”', action: 'hideapp' },
+        { label: '退出“' + an + '”', action: 'quitapp' },
+      ];
+      case '文件': return [
+        { label: '新建窗口', action: 'newwin' },
+        { label: '打开…', action: 'open' },
+        { sep: true },
+        { label: '关闭窗口', action: 'closewin' },
+        { label: '保存', action: 'save' },
+        { sep: true },
+        { label: '打印…', action: 'print' },
+      ];
+      case '编辑': return [
+        { label: '撤销', action: 'undo' },
+        { label: '重做', action: 'redo' },
+        { sep: true },
+        { label: '剪切', action: 'cut' },
+        { label: '复制', action: 'copy' },
+        { label: '粘贴', action: 'paste' },
+        { label: '全选', action: 'selectall' },
+      ];
+      case '显示': return [
+        { label: '进入全屏幕', action: 'fullscreen' },
+        { sep: true },
+        { label: (this.theme === 'macos' ? '切换到 Windows 主题' : '切换到 macOS 主题'), action: 'toggletheme' },
+        { label: '隐藏其他窗口', action: 'hideothers' },
+        { label: '全部显示', action: 'showall' },
+      ];
+      case '前往': return [
+        { label: '访达', action: 'goto:finder' },
+        { label: '应用程序', action: 'goto:/Applications' },
+        { label: '桌面', action: 'goto:/Users/guest/Desktop' },
+        { label: '文稿', action: 'goto:/Users/guest/Documents' },
+        { label: '下载', action: 'goto:/Users/guest/Downloads' },
+        { sep: true },
+        { label: '此电脑', action: 'goto:thispc' },
+      ];
+      case '窗口': return [
+        { label: '最小化', action: 'minimize' },
+        { label: '关闭窗口', action: 'closewin' },
+        { sep: true },
+        { label: '全部置于顶层', action: 'frontall' },
+        { sep: true },
+        { label: '强制退出…', action: 'forcequit' },
+      ];
+      case '帮助': return [
+        { label: 'DrapOG 帮助', action: 'help' },
+        { label: '关于本机', action: 'about' },
+      ];
+      default: return [];
+    }
+  }
+
+  barMenuLayout(name, items) {
+    const W = this.W();
+    const labels = this._mbLabels || this.menuBarLabels(W);
+    let x = 40;
+    const lbl = labels.find(l => l.label === name);
+    if (lbl) x = lbl.x;
+    const w = 220, rowH = 26, pad = 8;
+    let h = pad * 2;
+    for (const it of items) h += it.sep ? 12 : rowH;
+    return { x, y: this.MENU_BAR_H, w, h, items, rowH, pad };
+  }
+  openBarMenu(name) {
+    let items = (name === 'forcequit') ? this.windowListItems() : this.barMenuItems(name);
+    this.menu = Object.assign({ kind: 'bar', name }, this.barMenuLayout(name, items));
+  }
+
+  // 强制退出：列出当前打开的窗口，点击可强制关闭（处理无响应程序）
+  windowListItems() {
+    const items = [];
+    if (this.windows.length === 0) { items.push({ label: '无运行中的窗口', action: '__none' }); return items; }
+    for (const w of this.windows) {
+      const an = w.appId ? this.appMeta(w.appId).name : '窗口';
+      items.push({ label: (w.title || '窗口') + '  —  ' + an, action: 'kill:' + w.id });
+    }
+    return items;
   }
   startMenuLayout() {
     const H = this.H();
@@ -1094,6 +1226,17 @@ export class WindowManager {
       }
       return null;
     }
+    if (this.menu.kind === 'bar') {
+      const L = this.menu;
+      if (x < L.x || x > L.x + L.w || y < L.y || y > L.y + L.h) return null;
+      let iy = L.y + L.pad;
+      for (const it of L.items) {
+        const h = it.sep ? 12 : L.rowH;
+        if (!it.sep && y >= iy && y < iy + h) return it.action;
+        iy += h;
+      }
+      return null;
+    }
     const L = this.startMenuLayout();
     if (x < L.x || x > L.x + L.w || y < L.y || y > L.y + L.h) return null;
     const py = L.y + L.h - L.pad - L.powerH;
@@ -1112,13 +1255,29 @@ export class WindowManager {
     return null;
   }
   runMenuAction(a) {
+    if (!a) { this.closeMenu(); return; }
+    // 强制退出：打开窗口列表菜单（不直接关闭）
+    if (a === 'forcequit') { this.openBarMenu('forcequit'); return; }
     this.closeMenu();
-    if (!a) return;
     if (typeof a === 'object' && a.launch) {
       const app = this.apps.find(x => x.id === a.launch);
       this.launchApp(app || { id: a.launch, letter: appIcon(a.launch), title: a.launch });
       return;
     }
+    if (typeof a === 'string' && a.startsWith('kill:')) { const id = parseInt(a.slice(5)); this.closeWindow(id); return; }
+    if (a === '__none') return;
+    const focusWin = this.focusedId ? this.windows.find(w => w.id === this.focusedId) : null;
+    const dispatch = (act) => {
+      if (!focusWin) return false;
+      const app = this.getApp(focusWin.appId);
+      if (app && typeof app.onMenuAction === 'function') { try { return app.onMenuAction(act, focusWin, this); } catch (e) { return false; } }
+      // DrapLang 应用（窗口带 __sys）：把动作以 'menu <act>' 事件注入其 VM，由 drapp 的 on_menu 处理
+      if (focusWin.__sys && typeof focusWin.__sys.injectWinEvent === 'function') {
+        focusWin.__sys.injectWinEvent(focusWin.id, 'menu ' + act);
+        return true;
+      }
+      return false;
+    };
     switch (a) {
       case 'about': this.launchApp({ id: 'about', letter: 'Ab', title: '关于本机' }); break;
       case 'settings': this.launchApp({ id: 'settings', letter: 'Se', title: '设置' }); break;
@@ -1126,6 +1285,46 @@ export class WindowManager {
       case 'logout': this.locked = true; this._loggedOut = true; break;
       case 'restart': if (typeof location !== 'undefined') location.reload(); break;
       case 'shutdown': this.shutdown = true; break;
+      // 文件
+      case 'newwin': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder' }); break;
+      case 'open': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder' }); break;
+      case 'closewin': if (focusWin) this.closeWindow(focusWin.id); break;
+      case 'save': dispatch('save'); break;
+      case 'print': this.launchApp({ id: 'about', letter: 'Ab', title: '关于本机' }); break; // 占位：暂以关于本机替代打印对话框
+      // 编辑
+      case 'undo': dispatch('undo'); break;
+      case 'redo': dispatch('redo'); break;
+      case 'cut': dispatch('cut'); break;
+      case 'copy': dispatch('copy'); break;
+      case 'paste': dispatch('paste'); break;
+      case 'selectall': dispatch('selectall'); break;
+      // 显示
+      case 'fullscreen': if (focusWin) this.toggleMaximize(focusWin.id); break;
+      case 'toggletheme':
+        this.setTheme(this.theme === 'macos' ? 'windows' : 'macos');
+        this.savePrefs();
+        break;
+      case 'hideapp': if (focusWin) this.minimizeWindow(focusWin.id); break;
+      case 'hideothers':
+        for (const w of this.windows) { if (w !== focusWin && !w.minimized) this.minimizeWindow(w.id); }
+        break;
+      case 'showall':
+        for (const w of this.windows) { if (w.minimized) this.restoreWindow(w.id); }
+        break;
+      // 前往
+      case 'goto:finder': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder' }); break;
+      case 'goto:thispc': this.launchApp({ id: 'thispc', letter: 'P', title: '此电脑' }); break;
+      case 'goto:/Applications': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder', openPath: '/Applications' }); break;
+      case 'goto:/Users/guest/Desktop': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder', openPath: '/Users/guest/Desktop' }); break;
+      case 'goto:/Users/guest/Documents': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder', openPath: '/Users/guest/Documents' }); break;
+      case 'goto:/Users/guest/Downloads': this.launchApp({ id: 'finder', letter: 'Fi', title: 'Finder', openPath: '/Users/guest/Downloads' }); break;
+      // 窗口
+      case 'minimize': if (focusWin) this.minimizeWindow(focusWin.id); break;
+      case 'frontall': this.zOrder = this.windows.map(w => w.id); break;
+      // 帮助
+      case 'help': this.launchApp({ id: 'about', letter: 'Ab', title: '关于本机' }); break;
+      // app 菜单
+      case 'quitapp': if (focusWin) this.closeWindow(focusWin.id); break;
     }
   }
   unlock() { this.locked = false; this._loggedOut = false; }
@@ -1234,6 +1433,18 @@ export class WindowManager {
         else { ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '14px -apple-system, sans-serif'; ctx.fillText(it.label, L.x + 14, iy + h / 2); }
         iy += h;
       }
+    } else if (this.menu.kind === 'bar') {
+      const L = this.menu;
+      ctx.fillStyle = 'rgba(30,30,36,0.98)'; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; this.roundRect(L.x, L.y, L.w, L.h, 8); ctx.stroke();
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      let iy = L.y + L.pad;
+      for (const it of L.items) {
+        const h = it.sep ? 12 : L.rowH;
+        if (it.sep) { ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.moveTo(L.x + 8, iy + 6); ctx.lineTo(L.x + L.w - 8, iy + 6); ctx.stroke(); }
+        else { ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '14px -apple-system, sans-serif'; ctx.fillText(it.label, L.x + 14, iy + h / 2); }
+        iy += h;
+      }
     } else {
       const L = this.startMenuLayout();
       ctx.fillStyle = 'rgba(24,24,30,0.98)'; this.roundRect(L.x, L.y, L.w, L.h, 10); ctx.fill();
@@ -1295,10 +1506,10 @@ export class WindowManager {
   // macOS 风格菜单栏布局：左 = Apple 标志 + 焦点应用名（加粗）+ 应用菜单；右 = 状态区
   menuBarLayout(W) {
     const focusWin = this.focusedId ? this.windows.find(w => w.id === this.focusedId) : null;
-    const focusApp = focusWin ? this.apps.find(a => a.id === focusWin.appId) : null;
+    const appName = (focusWin && focusWin.appId) ? this.appMeta(focusWin.appId).name : '访达';
     return {
       menus: ['文件', '编辑', '显示', '前往', '窗口', '帮助'],
-      appName: focusApp ? focusApp.title : '访达',
+      appName,
       appNameX: 40,
     };
   }
@@ -1313,21 +1524,30 @@ export class WindowManager {
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
 
+    // 菜单栏标签几何（用于命中检测 + 高亮当前打开的菜单）
+    this._mbLabels = this.menuBarLabels(W);
+    const openName = (this.menu && this.menu.kind === 'bar') ? this.menu.name : null;
+
     // Apple 标志（手绘路径，点击弹主菜单）
+    if (this.menu && this.menu.kind === 'apple') { ctx.fillStyle = 'rgba(255,255,255,0.25)'; this.roundRect(8, 4, 26, this.MENU_BAR_H - 8, 6); ctx.fill(); }
     drawAppleLogo(ctx, 21, cy, 17);
 
     // 焦点应用名（加粗；无焦点窗口时显示访达）—— 白色，覆盖菜单栏深色底
+    const anX = L.appNameX;
+    if (openName === 'app') { ctx.fillStyle = 'rgba(255,255,255,0.22)'; this.roundRect(anX - 6, 3, ctx.measureText(L.appName).width + 18, this.MENU_BAR_H - 6, 6); ctx.fill(); }
     ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
     ctx.font = '600 13.5px -apple-system, sans-serif';
-    ctx.fillText(L.appName, L.appNameX, cy + 0.5);
+    ctx.fillText(L.appName, anX, cy + 0.5);
 
     // 应用菜单项（文件 编辑 显示 前往 窗口 帮助）
     ctx.font = '13.5px -apple-system, sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    let mx = L.appNameX + ctx.measureText(L.appName).width + 24;
+    let mx = anX + ctx.measureText(L.appName).width + 24;
     for (const m of L.menus) {
+      const w = ctx.measureText(m).width + 22;
+      if (openName === m) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; this.roundRect(mx - 6, 3, w, this.MENU_BAR_H - 6, 6); ctx.fill(); }
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.fillText(m, mx, cy + 0.5);
-      mx += ctx.measureText(m).width + 20;
+      mx += w;
     }
 
     const now = new Date();

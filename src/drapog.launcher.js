@@ -35,12 +35,17 @@ export const drapAppBridge = {
     for (const op of st.drawOps) {
       if (op.op === 'text') {
         ctx.fillStyle = _rgb(op.color);
-        ctx.font = op.font + 'px ' + (op.mono
+        const stylePrefix = (op.italic ? 'italic ' : '') + (op.bold ? '600 ' : '');
+        ctx.font = stylePrefix + op.font + 'px ' + (op.mono
           ? 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
           : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
         ctx.fillText(op.text, op.x, op.y);
+        if (op.underline) {
+          const tw = ctx.measureText(op.text).width;
+          ctx.fillRect(op.x, op.y + op.font + 1, tw, Math.max(1, op.font / 14));
+        }
       } else if (op.op === 'fill') {
         ctx.fillStyle = _rgb(op.color);
         ctx.fillRect(op.x, op.y, op.w, op.h);
@@ -123,7 +128,8 @@ export const drapAppBridge = {
 
 // 启动一个「已编译」的 DrapLang GUI 程序（program = {instructions, strings}）：建 VM+sys → 跑事件循环
 // openPath：可选初始打开路径（openFinderAt 透传），写入窗口状态 __openPath 供 win_get_open_path 读取
-export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath = null) {
+// appId：真实应用 id（注册表 id），用于窗口归属 / 菜单栏命名；默认 '__drapapp__'
+export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath = null, appId = '__drapapp__') {
   const vm = new VM();
   vm.load(program);
   const sys = new DrapSYS({
@@ -131,7 +137,7 @@ export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath
     vfs,
     out: () => {},
     onWinCreate: ({ title, w, h }) => {
-      const win = wm.createWindow({ title, w, h, appId: '__drapapp__' });
+      const win = wm.createWindow({ title, w, h, appId });
       win.__sys = sys;
       const st = sys.drapWins.get(win.id);
       if (st) st.__openPath = openPath || '';
@@ -146,6 +152,7 @@ export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath
       onGetSoftKeyboard: () => !!(wm && wm.softKeyboard && wm.softKeyboard.open),
       registry,
       wm,
+      openPath,
   });
   vm.sys = sys;
   // 跑 VM：内部事件循环会在 win_get_event 处阻塞，由真实事件唤醒
@@ -164,7 +171,7 @@ export function launchDrapApp(wm, vfs, source, opts = {}) {
     console.error('DrapLang 应用编译失败', err);
     return null;
   }
-  return launchDrapAppProgram(wm, vfs, program, opts.registry || null, opts.openPath || null);
+  return launchDrapAppProgram(wm, vfs, program, opts.registry || null, opts.openPath || null, opts.appId || '__drapapp__');
 }
 
 // 从 URL 拉取 DrapLang 源码并启动（dock / 注册表 启动 gui 型 .app 用）

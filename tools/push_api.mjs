@@ -22,6 +22,32 @@ const MSG = process.env.COMMIT_MSG || '通过 Git Data API 推送本地改动';
 const EXCLUDE = (process.env.EXCLUDE || '').split(',').map(s => s.trim()).filter(Boolean);
 function excluded(path) { return EXCLUDE.some(p => path === p || path.startsWith(p)); }
 
+// git 在非 TTY 下对含非 ASCII/控制字符的路径做 C 风格引号转义（如中文名 -> "\346\236\204..."）。
+// 这里把转义串还原成真实路径（按字节累积后 UTF-8 解码），否则含中文的文件会被误判为新增+删除且 readFileSync 失败。
+function cUnquote(s) {
+  if (!(s.startsWith('"') && s.endsWith('"'))) return s;
+  const inner = s.slice(1, -1);
+  const bytes = [];
+  for (let i = 0; i < inner.length; i++) {
+    if (inner[i] === '\\' && i + 1 < inner.length) {
+      const n = inner[i + 1];
+      if (n >= '0' && n <= '7') {
+        let oct = ''; let j = i + 1;
+        while (j < inner.length && inner[j] >= '0' && inner[j] <= '7' && oct.length < 3) { oct += inner[j]; j++; }
+        bytes.push(parseInt(oct, 8));
+        i = j - 1;
+        continue;
+      } else if (n === 'n') { bytes.push(10); i++; continue; }
+      else if (n === 't') { bytes.push(9); i++; continue; }
+      else if (n === '"') { bytes.push(34); i++; continue; }
+      else if (n === '\\') { bytes.push(92); i++; continue; }
+      else { bytes.push(n.charCodeAt(0)); i++; continue; }
+    }
+      bytes.push(inner.charCodeAt(i));
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -48,9 +74,7 @@ function localTreeMap() {
     if (!line.trim()) continue;
     const mt = line.match(/^\d+\s+\w+\s+(\w+)\t(.+)$/);
     if (!mt) continue;
-    let path = mt[2];
-    // git 在非 TTY 输出时对含非 ASCII 的路径做 C 风格引号转义，剥掉首尾引号
-    if (path.startsWith('"') && path.endsWith('"')) path = path.slice(1, -1);
+    let path = cUnquote(mt[2]);
     m[path] = mt[1];
   }
   return m;

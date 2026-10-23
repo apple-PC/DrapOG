@@ -1,18 +1,29 @@
 // DocEdit —— DrapLang 文档编辑器（办公级第一块拼图，L6 自举示范）
 // 多行文本编辑：方向键 / Home / End / 退格 / 回车、滚动、点击定位光标、
 // 打开 / 保存任意路径、字数 / 行列统计、未保存标记。
-// 模型：main 初始化共享状态；on_paint 自绘；on_key / on_click 处理输入。
+// 格式工具栏：新建 / 打开 / 保存、粗体 / 斜体 / 下划线（逐行样式，渲染生效）、
+// 字号 ±、左 / 中 / 右 对齐（逐行）、撤销 / 重做、复制 / 剪切 / 粘贴。
+// 模型：main 初始化共享状态；on_paint 自绘；on_key / on_click / on_menu 处理输入与菜单动作。
 entry fn main() -> i32 {
     let win = syscall win_create("DocEdit 文档编辑器", 720, 520)
     syscall win_mono(1)
     syscall win_set_font(15)
     let lines = [""]
+    let bArr = [0]
+    let iArr = [0]
+    let uArr = [0]
+    let aligns = [0]
+    let sizes = [15]
     let row = 0
     let col = 0
     let scroll = 0
     let dirty = 0
     let path = "/Users/guest/Documents/未命名.txt"
     syscall win_set_input("path", path)
+    let undoStack = []
+    let redoStack = []
+    let clip = ""
+    let LINEH = 24
     // 跨事件复用的临时变量（单线程事件循环，安全）
     let i = 0
     let n = 0
@@ -31,38 +42,112 @@ entry fn main() -> i32 {
     let content = ""
     let c = ""
     let eff = ""
-    let nl = []
     let mark = ""
+    let snap = ""
+    let seg = [""]
+    let m = [""]
+    let meta = [""]
+    let pi = 0
+    let parts = [""]
+    let p = ""
+    let sz = 0
+    let al = 0
+    let cw = 0
+    let tw = 0
+    let tx = 0
+    let nb = [0]
+    let nl = [""]
+    let ni = [0]
+    let nu = [0]
+    let na = [0]
+    let ns = [0]
+    let act = ""
+    let b = 0
+    let ii = 0
+    let uu = 0
 }
 
+// 把当前完整文档状态编码为字符串（用于撤销 / 重做快照），结果写入 snap
+// 编码：每行 = text + "\t" + b + "," + i + "," + u + "," + align + "," + size；行间 "\n"；末尾附加 "##" 元数据 与 "##P" 路径
 event fn on_paint() {
     let w = syscall win_w()
     let h = syscall win_h()
     // 编辑器背景（主题语义色）
     syscall win_theme(0)
     syscall win_fill_rect(0, 0, w, h)
-    // 工具栏
+    // 工具栏底色
     syscall win_theme(3)
-    syscall win_fill_rect(0, 0, w, 30)
-    syscall win_button("打开", 8, 4, 56, 22)
-    syscall win_button("保存", 72, 4, 56, 22)
-    syscall win_input("path", 140, 4, w - 148, 22)
-    // 文本区（等宽 15px，行高 20，起始 y=36）
-    vis = (h - 58) / 20
+    syscall win_fill_rect(0, 0, w, 56)
+    // 第一行：新建 / 打开 / 保存 / 路径
+    syscall win_button("新建", 8, 4, 56, 22)
+    syscall win_button("打开", 72, 4, 56, 22)
+    syscall win_button("保存", 136, 4, 56, 22)
+    syscall win_input("path", 200, 4, w - 208, 22)
+    // 第二行：格式按钮（手绘，便于高亮激活态）
+    // 粗体 B / 斜体 I / 下划线 U
+    if (bArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(8, 30, 30, 22)
+    syscall win_theme(1); syscall win_set_font(15); syscall win_text(18, 33, "B")
+    if (iArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(42, 30, 30, 22)
+    syscall win_theme(1); syscall win_set_font(14); syscall win_text(51, 34, "I")
+    if (uArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(76, 30, 30, 22)
+    syscall win_theme(1); syscall win_set_font(14); syscall win_text(83, 34, "U")
+    // 字号 - / +
+    syscall win_set_color(82, 82, 92)
+    syscall win_fill_rect(116, 30, 40, 22)
+    syscall win_fill_rect(160, 30, 40, 22)
+    syscall win_theme(1); syscall win_set_font(13)
+    syscall win_text(126, 34, "A-")
+    syscall win_text(170, 34, "A+")
+    // 对齐 左 / 中 / 右
+    if (aligns[row] == 0) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(206, 30, 30, 22)
+    if (aligns[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(240, 30, 30, 22)
+    if (aligns[row] == 2) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
+    syscall win_fill_rect(274, 30, 30, 22)
+    syscall win_theme(1); syscall win_set_font(13)
+    syscall win_text(214, 34, "左")
+    syscall win_text(248, 34, "中")
+    syscall win_text(282, 34, "右")
+    // 文本区（逐行渲染：字号 / 样式 / 对齐）
+    vis = (h - 60 - 22) / LINEH
     i = scroll
     while (i < scroll + vis) {
         if (i < len(lines)) {
+            sz = sizes[i]
+            al = aligns[i]
+            syscall win_set_font(sz)
+            syscall win_set_style(bArr[i], iArr[i], uArr[i])
             syscall win_theme(1)
-            syscall win_text(4, 36 + (i - scroll) * 20, lines[i])
+            line = lines[i]
+            cw = sz * 6 / 10
+            tw = len(line) * cw
+            if (al == 0) { tx = 4 }
+            else if (al == 1) { tx = (w - tw) / 2 }
+            else { tx = w - 4 - tw }
+            syscall win_text(tx, 60 + (i - scroll) * LINEH, line)
         }
         i = i + 1
     }
-    // 光标（2px 竖线）
+    // 复位样式，避免影响后续绘制
+    syscall win_set_style(0, 0, 0)
+    // 光标（2px 竖线，按当前行字号）
     if (row >= scroll && row < scroll + vis) {
-        cx = 4 + col * 9
-        cy = 36 + (row - scroll) * 20
+        sz = sizes[row]
+        cw = sz * 6 / 10
+        al = aligns[row]
+        line = lines[row]
+        tw = len(line) * cw
+        if (al == 0) { tx = 4 }
+        else if (al == 1) { tx = (w - tw) / 2 }
+        else { tx = w - 4 - tw }
+        cx = tx + col * cw
+        cy = 60 + (row - scroll) * LINEH
         syscall win_theme(2)
-        syscall win_fill_rect(cx, cy, 2, 20)
+        syscall win_fill_rect(cx, cy, 2, sz)
     }
     // 状态栏
     syscall win_theme(3)
@@ -76,12 +161,27 @@ event fn on_paint() {
     mark = ""
     if (dirty == 1) { mark = "  *未保存" }
     syscall win_theme(1)
-    syscall win_text(8, h - 18, "行 " + itoa(row + 1) + "/" + itoa(len(lines)) + "  列 " + itoa(col) + "  字符 " + itoa(total) + "  " + eff + mark)
+    syscall win_set_font(11)
+    syscall win_text(8, h - 18, "行 " + itoa(row + 1) + "/" + itoa(len(lines)) + "  列 " + itoa(col) + "  字符 " + itoa(total) + "  字号 " + itoa(sizes[row]) + "  " + eff + mark)
 }
 
 event fn on_key(ev: str) {
     if (ev == "key ") { k = " " }
     else { k = substr(ev, 4) }
+    // 是否为改变内容的按键（需记录撤销快照）
+    if (k == "Backspace" || k == "Enter" || len(k) == 1) {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+    }
     if (k == "Backspace") {
         if (col > 0) {
             line = lines[row]
@@ -94,13 +194,17 @@ event fn on_key(ev: str) {
             left = lines[row - 1]
             line = lines[row]
             lines[row - 1] = left + line
-            nl = []
+            nb = []
+            ni = []
+            nu = []
+            na = []
+            ns = []
             i = 0
-            while (i < len(lines)) {
-                if (i != row) { nl.push(lines[i]) }
+            while (i < len(bArr)) {
+                if (i != row) { nb.push(bArr[i]); ni.push(iArr[i]); nu.push(uArr[i]); na.push(aligns[i]); ns.push(sizes[i]) }
                 i = i + 1
             }
-            lines = nl
+            bArr = nb; iArr = ni; uArr = nu; aligns = na; sizes = ns
             row = row - 1
             col = len(left)
             dirty = 1
@@ -109,6 +213,18 @@ event fn on_key(ev: str) {
         line = lines[row]
         left = substr(line, 0, col)
         right = substr(line, col)
+        nb = []
+        ni = []
+        nu = []
+        na = []
+        ns = []
+        i = 0
+        while (i < len(bArr)) {
+            if (i == row) { nb.push(bArr[row]); nb.push(bArr[row]); ni.push(iArr[row]); ni.push(iArr[row]); nu.push(uArr[row]); nu.push(uArr[row]); na.push(aligns[row]); na.push(aligns[row]); ns.push(sizes[row]); ns.push(sizes[row]) }
+            else { nb.push(bArr[i]); ni.push(iArr[i]); nu.push(uArr[i]); na.push(aligns[i]); ns.push(sizes[i]) }
+            i = i + 1
+        }
+        bArr = nb; iArr = ni; uArr = nu; aligns = na; sizes = ns
         lines[row] = left
         nl = []
         i = 0
@@ -143,7 +259,7 @@ event fn on_key(ev: str) {
         dirty = 1
     }
     // 滚动跟随光标
-    vis = (syscall win_h() - 58) / 20
+    vis = (syscall win_h() - 60 - 22) / LINEH
     if (row < scroll) { scroll = row }
     if (row >= scroll + vis) { scroll = row - vis + 1 }
     if (scroll < 0) { scroll = 0 }
@@ -151,19 +267,53 @@ event fn on_key(ev: str) {
 }
 
 event fn on_click(ev: str) {
-    id = split(ev, " ")[1]
-    if (id == "打开") {
+    let parts2 = split(ev, " ")
+    if (len(parts2) >= 2) { id = parts2[1] } else { id = "" }
+    if (len(parts2) >= 3) { x = atoi(parts2[1]); y = atoi(parts2[2]) } else { x = -1; y = -1 }
+    if (id == "新建") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        lines = [""]; bArr = [0]; iArr = [0]; uArr = [0]; aligns = [0]; sizes = [15]
+        row = 0; col = 0; scroll = 0; dirty = 0
+        path = "/Users/guest/Documents/未命名.txt"
+        syscall win_set_input("path", path)
+        syscall win_invalidate(win)
+    } else if (id == "打开") {
         eff = syscall win_input_get("path")
         if (eff == "") { eff = path }
         n = syscall fs_exists(eff)
         if (n == 1) {
+            snap = ""
+            i = 0
+            while (i < len(lines)) {
+                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                i = i + 1
+            }
+            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+            snap = snap + "\n##P" + path
+            undoStack.push(snap)
+            redoStack = []
             c = syscall fs_read(eff)
             lines = split(c, "\n")
+            bArr = []
+            iArr = []
+            uArr = []
+            aligns = []
+            sizes = []
+            i = 0
+            while (i < len(lines)) { bArr.push(0); iArr.push(0); uArr.push(0); aligns.push(0); sizes.push(15); i = i + 1 }
             path = eff
-            row = 0
-            col = 0
-            scroll = 0
-            dirty = 0
+            row = 0; col = 0; scroll = 0; dirty = 0
         }
         syscall win_invalidate(win)
     } else if (id == "保存") {
@@ -180,21 +330,263 @@ event fn on_click(ev: str) {
         path = eff
         dirty = 0
         syscall win_invalidate(win)
+    } else if (id == "path") {
+        syscall win_invalidate(win)
+    } else if (y >= 30 && y <= 52 && x >= 0) {
+        // 第二行格式按钮（手绘，坐标命中）—— 先记录撤销快照
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        if (x >= 8 && x <= 38) { bArr[row] = 1 - bArr[row]; dirty = 1 }
+        else if (x >= 42 && x <= 72) { iArr[row] = 1 - iArr[row]; dirty = 1 }
+        else if (x >= 76 && x <= 106) { uArr[row] = 1 - uArr[row]; dirty = 1 }
+        else if (x >= 116 && x <= 156) {
+            sz = sizes[row]
+            sz = sz - 1
+            if (sz < 11) { sz = 11 }
+            sizes[row] = sz
+            dirty = 1
+        } else if (x >= 160 && x <= 200) {
+            sz = sizes[row]
+            sz = sz + 1
+            if (sz > 22) { sz = 22 }
+            sizes[row] = sz
+            dirty = 1
+        } else if (x >= 206 && x <= 236) { aligns[row] = 0; dirty = 1 }
+        else if (x >= 240 && x <= 270) { aligns[row] = 1; dirty = 1 }
+        else if (x >= 274 && x <= 304) { aligns[row] = 2; dirty = 1 }
+        syscall win_invalidate(win)
     } else {
         // 文本区点击定位光标
-        x = atoi(split(ev, " ")[1])
-        y = atoi(split(ev, " ")[2])
-        if (y >= 36 && y < syscall win_h() - 22) {
-            row = scroll + (y - 36) / 20
+        if (y >= 60 && y < syscall win_h() - 22) {
+            row = scroll + (y - 60) / LINEH
             if (row < 0) { row = 0 }
             if (row >= len(lines)) { row = len(lines) - 1 }
             ln = len(lines[row])
-            col = (x - 4) / 9
+            sz = sizes[row]
+            cw = sz * 6 / 10
+            al = aligns[row]
+            line = lines[row]
+            tw = len(line) * cw
+            if (al == 0) { tx = 4 }
+            else if (al == 1) { tx = (syscall win_w() - tw) / 2 }
+            else { tx = syscall win_w() - 4 - tw }
+            col = (x - tx) / cw
             if (col < 0) { col = 0 }
             if (col > ln) { col = ln }
             syscall win_invalidate(win)
         }
     }
+}
+
+// 菜单栏动作（文件 / 编辑 经 WM dispatch 注入 'menu <act>'）：新建 / 打开 / 保存 / 撤销 / 重做 / 粗体 / 斜体 / 下划线 / 复制 / 剪切 / 粘贴 / 全选
+event fn on_menu(ev: str) {
+    act = substr(ev, 5)
+    if (act == "new") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        lines = [""]; bArr = [0]; iArr = [0]; uArr = [0]; aligns = [0]; sizes = [15]
+        row = 0; col = 0; scroll = 0; dirty = 0
+        path = "/Users/guest/Documents/未命名.txt"
+        syscall win_set_input("path", path)
+    } else if (act == "open") {
+        eff = syscall win_input_get("path")
+        if (eff == "") { eff = path }
+        n = syscall fs_exists(eff)
+        if (n == 1) {
+            snap = ""
+            i = 0
+            while (i < len(lines)) {
+                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                i = i + 1
+            }
+            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+            snap = snap + "\n##P" + path
+            undoStack.push(snap)
+            redoStack = []
+            c = syscall fs_read(eff)
+            lines = split(c, "\n")
+            bArr = []; iArr = []; uArr = []; aligns = []; sizes = []
+            i = 0
+            while (i < len(lines)) { bArr.push(0); iArr.push(0); uArr.push(0); aligns.push(0); sizes.push(15); i = i + 1 }
+            path = eff
+            row = 0; col = 0; scroll = 0; dirty = 0
+        }
+    } else if (act == "save") {
+        eff = syscall win_input_get("path")
+        if (eff == "") { eff = path }
+        content = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { content = lines[i] }
+            else { content = content + "\n" + lines[i] }
+            i = i + 1
+        }
+        syscall fs_write(eff, content)
+        path = eff
+        dirty = 0
+    } else if (act == "undo") {
+        if (len(undoStack) > 0) {
+            snap = ""
+            i = 0
+            while (i < len(lines)) {
+                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                i = i + 1
+            }
+            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+            snap = snap + "\n##P" + path
+            redoStack.push(snap)
+            p = undoStack[len(undoStack) - 1]
+            nb = []
+            i = 0
+            while (i < len(undoStack) - 1) { nb.push(undoStack[i]); i = i + 1 }
+            undoStack = nb
+            // 还原 p
+            parts = split(p, "\n")
+            lines = []; bArr = []; iArr = []; uArr = []; aligns = []; sizes = []
+            i = 0
+            while (i < len(parts)) {
+                p = parts[i]
+                if (substr(p, 0, 3) == "##P") {
+                    path = substr(p, 3)
+                } else if (substr(p, 0, 2) == "##") {
+                    meta = split(substr(p, 2), ",")
+                    row = atoi(meta[0]); col = atoi(meta[1]); scroll = atoi(meta[2]); dirty = atoi(meta[3])
+                } else {
+                    seg = split(p, "\t")
+                    m = split(seg[1], ",")
+                    lines.push(seg[0])
+                    bArr.push(atoi(m[0])); iArr.push(atoi(m[1])); uArr.push(atoi(m[2])); aligns.push(atoi(m[3])); sizes.push(atoi(m[4]))
+                }
+                i = i + 1
+            }
+        }
+    } else if (act == "redo") {
+        if (len(redoStack) > 0) {
+            snap = ""
+            i = 0
+            while (i < len(lines)) {
+                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                i = i + 1
+            }
+            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+            snap = snap + "\n##P" + path
+            undoStack.push(snap)
+            p = redoStack[len(redoStack) - 1]
+            nb = []
+            i = 0
+            while (i < len(redoStack) - 1) { nb.push(redoStack[i]); i = i + 1 }
+            redoStack = nb
+            parts = split(p, "\n")
+            lines = []; bArr = []; iArr = []; uArr = []; aligns = []; sizes = []
+            i = 0
+            while (i < len(parts)) {
+                p = parts[i]
+                if (substr(p, 0, 3) == "##P") {
+                    path = substr(p,3)
+                } else if (substr(p, 0, 2) == "##") {
+                    meta = split(substr(p, 2), ",")
+                    row = atoi(meta[0]); col = atoi(meta[1]); scroll = atoi(meta[2]); dirty = atoi(meta[3])
+                } else {
+                    seg = split(p, "\t")
+                    m = split(seg[1], ",")
+                    lines.push(seg[0])
+                    bArr.push(atoi(m[0])); iArr.push(atoi(m[1])); uArr.push(atoi(m[2])); aligns.push(atoi(m[3])); sizes.push(atoi(m[4]))
+                }
+                i = i + 1
+            }
+        }
+    } else if (act == "bold") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        bArr[row] = 1 - bArr[row]; dirty = 1
+    } else if (act == "italic") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        iArr[row] = 1 - iArr[row]; dirty = 1
+    } else if (act == "underline") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        uArr[row] = 1 - uArr[row]; dirty = 1
+    }
+    else if (act == "copy") { clip = lines[row] }
+    else if (act == "cut") {
+        clip = lines[row]
+        lines[row] = ""
+        dirty = 1
+    } else if (act == "paste") {
+        snap = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+            else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+            i = i + 1
+        }
+        snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+        snap = snap + "\n##P" + path
+        undoStack.push(snap)
+        redoStack = []
+        line = lines[row]
+        lines[row] = line + clip
+        col = col + len(clip)
+        dirty = 1
+    } else if (act == "selectall") {
+        clip = ""
+        i = 0
+        while (i < len(lines)) {
+            if (i == 0) { clip = lines[i] }
+            else { clip = clip + "\n" + lines[i] }
+            i = i + 1
+        }
+    }
+    syscall win_invalidate(win)
 }
 
 event fn on_close() {

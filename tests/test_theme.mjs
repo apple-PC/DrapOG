@@ -73,7 +73,7 @@ console.log('== 主菜单：macOS Apple 菜单 ==');
   ok(mac.menu && mac.menu.kind === 'apple', '点 Apple 标志 → 打开 apple 菜单');
   const L = mac.appleMenuLayout();
   // 逐项命中（行高 26，含一个 sep=12）
-  const rows = [['关于本机', 'about'], ['系统设置...', 'settings'], ['锁定屏幕', 'lock'], ['重新启动...', 'restart'], ['关机...', 'shutdown']];
+  const rows = [['关于本机', 'about'], ['系统设置...', 'settings'], ['强制退出...', 'forcequit'], ['锁定屏幕', 'lock'], ['重新启动...', 'restart'], ['关机...', 'shutdown']];
   let iy = L.y + L.pad;
   for (const it of L.items) {
     const h = it.sep ? 12 : L.rowH;

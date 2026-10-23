@@ -14,7 +14,7 @@ export class DrapSYS {
    * @param {Object} opts.vfs                      虚拟文件系统
    * @param {Function} opts.out                    输出回调
    */
-  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard, registry, wm, shell }) {
+  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard, registry, wm, shell, openPath }) {
     this.vm = vm;
     this.vfs = vfs;
     this.out = out || (() => {});
@@ -46,6 +46,7 @@ export class DrapSYS {
     this._shellCwd = '/Users/guest';      // win_shell_exec 持久工作目录
     this.drapWins = new Map(); // winId -> { queue, resolver, drawOps, style, title, dirty }
     this.curWinId = null;      // 当前绘制 / 输入目标窗口
+    this._openPath = openPath || ''; // 本应用启动时透传的初始打开路径（win_get_open_path 读取）
 
     this.argv = [];            // 命令行参数（argv[0] = 程序名），由启动器注入
 
@@ -101,6 +102,7 @@ export class DrapSYS {
       0x5a: this.win_set_softkeyboard.bind(this), // 切换移动端软键盘
       0x5b: this.win_get_theme.bind(this),        // 读取当前主题（0=macos 1=windows）
       0x5c: this.win_get_softkeyboard.bind(this), // 读取软键盘状态（0=关 1=开）
+      0x5f: this.win_set_style.bind(this),         // 设置后续 win_text 的样式（bold, italic, underline：0/1）
       // 应用注册表 / 宿主桥接（DrapLang 经此枚举/启动应用、执行命令、绘制图标、移入废纸篓）
       0x80: this.win_app_list.bind(this),         // 枚举已注册应用（每行 id|name|category）
       0x81: this.win_app_launch.bind(this),       // 启动应用（id）
@@ -330,11 +332,13 @@ export class DrapSYS {
       drawOps: [],
       controls: [],        // 声明式控件：每帧 paint 时重置，由 drapp 填充
       inputs: new Map(),   // 输入框持久值：id -> string（跨帧保留用户输入）
-      style: { color: [255, 255, 255], font: 14, mono: false },
+      style: { color: [255, 255, 255], font: 14, mono: false, bold: false, italic: false, underline: false },
       title, w, h,
       dirty: true,
     });
     this.curWinId = id;
+    const st0 = this.drapWins.get(id);
+    if (st0) st0.__openPath = this._openPath || '';
     this._pushEvent(id, 'paint');   // 首帧
     return id;
   }
@@ -361,7 +365,7 @@ export class DrapSYS {
   win_text(x, y, strPtr) {
     const st = this._cur();
     if (!st) return 0;
-    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono });
+    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono, bold: !!st.style.bold, italic: !!st.style.italic, underline: !!st.style.underline });
     return 0;
   }
 
@@ -390,6 +394,16 @@ export class DrapSYS {
     const st = this._cur();
     if (!st) return 0;
     st.style.font = size;
+    return 0;
+  }
+
+  // 设置后续 win_text 的样式：bold / italic / underline（0=关，非 0=开）
+  win_set_style(bold, italic, underline) {
+    const st = this._cur();
+    if (!st) return 0;
+    st.style.bold = (bold != 0);
+    st.style.italic = (italic != 0);
+    st.style.underline = (underline != 0);
     return 0;
   }
 

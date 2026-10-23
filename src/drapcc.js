@@ -60,6 +60,7 @@ const SYS_TABLE = {
   'win_set_softkeyboard':0x5a, // 切换软键盘：win_set_softkeyboard(0|1)
   'win_get_theme':      0x5b, // 读取当前主题：返回 0=macos 1=windows（设置 App 启动高亮用）
   'win_get_softkeyboard':0x5c,
+  'win_set_style':      0x5f, // 设置文本样式：win_set_style(bold, italic, underline) 0/1
   'win_get_open_path':  0x86, // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
   // 应用注册表 / 宿主桥接（DrapLang 枚举/启动应用、执行命令、绘制图标、移入废纸篓）
   'win_app_list':       0x80, // 枚举已注册应用：win_app_list() → 每行 "id|name|category"
@@ -78,6 +79,7 @@ const EVENT_TYPES = {
   on_click: 'click',
   on_key:   'key',
   on_input: 'input',
+  on_menu:  'menu',
   on_close: 'close',
 };
 
@@ -171,6 +173,7 @@ const SYS_RET = {
   'win_shell_exec':      { kind: 'prim', name: 'str' },
   'win_app_icon':        { kind: 'prim', name: 'i32' },
   'win_trash':           { kind: 'prim', name: 'i32' },
+  'win_set_style':        { kind: 'prim', name: 'i32' },
   'win_get_open_path':    { kind: 'prim', name: 'str' },
   'args_count': { kind: 'prim', name: 'i32' },
   'args_get':    { kind: 'prim', name: 'str' },
@@ -232,6 +235,7 @@ const SYS_ARGS = {
   'win_shell_exec':       1,
   'win_app_icon':         4,
   'win_trash':            1,
+  'win_set_style':         3,
   'win_get_open_path':     0,
   'args_count': 0,
   'args_get':   1,
@@ -975,6 +979,7 @@ export class DrapCC {
       { t: 'click', h: this.eventHandlers.get('on_click') },
       { t: 'key',   h: this.eventHandlers.get('on_key') },
       { t: 'input', h: this.eventHandlers.get('on_input') },
+      { t: 'menu',  h: this.eventHandlers.get('on_menu') },
     ];
     let chain = null;
     for (let i = items.length - 1; i >= 0; i--) {

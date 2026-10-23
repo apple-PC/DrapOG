@@ -176,8 +176,8 @@ export class AppRegistry {
       try { r = await this.resolve(a, env.vfs); }
       catch (e) { return { error: '加载失败: ' + e.message }; }
       if (!r) return { error: '找不到 ' + (a.name || id) + ' 的源码' };
-      if (r.kind === 'dbyte') launchDrapAppProgram(env.wm, env.vfs, r.program, this, env.openPath || null);
-      else launchDrapApp(env.wm, env.vfs, r.source, { modules: r.modules, registry: this, openPath: env.openPath || null });
+      if (r.kind === 'dbyte') launchDrapAppProgram(env.wm, env.vfs, r.program, this, env.openPath || null, id);
+      else launchDrapApp(env.wm, env.vfs, r.source, { modules: r.modules, registry: this, openPath: env.openPath || null, appId: id });
       return { ok: true };
     }
 
