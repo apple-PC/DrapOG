@@ -83,6 +83,16 @@ export class WindowManager {
 
   getApp(id) { return this._appImpls.get(id); }
 
+  // 解析窗口的渲染/事件处理器：优先取真实 appId 的内建实现（host 应用）；
+  // 若该窗口是 DrapLang 自举应用（带 __sys，其窗口 appId 为真实 id，但宿主桥接只注册在
+  // '__drapapp__'），回退到统一宿主桥接，保证内容区渲染与鼠标/键盘/右键路由生效。
+  appHandler(win) {
+    const a = this.getApp(win.appId);
+    if (a) return a;
+    if (win && win.__sys) return this.getApp('__drapapp__');
+    return null;
+  }
+
   // 运行时切换主题（如 shell 里 `gui windows`）：更新配置，下一帧 render 即生效
   setTheme(theme) {
     this.theme = normalizeTheme(theme);
@@ -422,7 +432,7 @@ export class WindowManager {
     }
 
     if (this.hitContent(w, x, y)) {
-      const app = this.getApp(w.appId);
+      const app = this.appHandler(w);
       if (app && app.onMouseDown) {
         const lx = x - w.x;
         const ly = y - w.y - w.TITLEBAR_H;
@@ -478,7 +488,7 @@ export class WindowManager {
     if (!this.focusedId) return;
     const w = this.windows.find(w => w.id === this.focusedId);
     if (!w || w.minimized) return;
-    const app = this.getApp(w.appId);
+    const app = this.appHandler(w);
     if (app && app.onKeyDown) {
       try {
         const handled = app.onKeyDown(e, w, this);
@@ -507,7 +517,7 @@ export class WindowManager {
     }
     if (this.hitTitleBar(w, x, y)) return 'grab';
     if (this.hitContent(w, x, y)) {
-      const app = this.getApp(w.appId);
+      const app = this.appHandler(w);
       if (app && app.getCursor) {
         const lx = x - w.x, ly = y - w.y - w.TITLEBAR_H;
         return app.getCursor(lx, ly, w, this) || 'default';
@@ -904,7 +914,7 @@ export class WindowManager {
     ctx.stroke();
 
     // 内容区（裁剪后交给 app 渲染）
-    const app = this.getApp(w.appId);
+    const app = this.appHandler(w);
     if (app && app.render) {
       ctx.save();
       ctx.beginPath();
@@ -1338,7 +1348,7 @@ export class WindowManager {
     if (y > this.H() - bottom) return;
     const w = this.hitTest(x, y);
     if (w) {
-      const app = this.getApp(w.appId);
+      const app = this.appHandler(w);
       const items = (app && app.contextMenu) ? app.contextMenu(x - w.x, y - w.y - w.TITLEBAR_H, w, this) : [{ label: '刷新', action: 'refresh' }];
       if (items && items.length) this.openContextMenu(x, y, items, null);
     } else {
