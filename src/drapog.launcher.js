@@ -106,16 +106,35 @@ export const drapAppBridge = {
   onMouseDown(lx, ly, win, wm) {
     const sys = win.__sys;
     if (!sys) return;
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const hit = sys.hitControl(win.id, Math.round(lx), Math.round(ly));
+    let type, target;
     if (hit && hit.type === 'button') {
-      sys.injectWinEvent(win.id, 'click ' + hit.id);
+      type = 'button'; target = hit.id;
+      win.__focusId = null;
     } else if (hit && hit.type === 'input') {
       win.__focusId = hit.id;
       sys.injectWinEvent(win.id, 'click ' + hit.id);   // 通知 drapp 聚焦
+      win.__lastClick = null;
+      return;
     } else {
+      type = 'content'; target = Math.round(lx) + ' ' + Math.round(ly);
       win.__focusId = null;
-      sys.injectWinEvent(win.id, 'click ' + Math.round(lx) + ' ' + Math.round(ly));
     }
+    // 双击检测：同窗口、350ms 内、同目标（按钮同 id / 内容区同坐标 ±6px）→ 注入 dblclick
+    const last = win.__lastClick;
+    if (last && last.type === type && now - last.t < 350) {
+      let isDbl = false;
+      if (type === 'button') { if (last.target === target) isDbl = true; }
+      else { if (Math.abs(last.lx - lx) < 6 && Math.abs(last.ly - ly) < 6) isDbl = true; }
+      if (isDbl) {
+        sys.injectWinEvent(win.id, 'dblclick ' + target);
+        win.__lastClick = null;
+        return;
+      }
+    }
+    sys.injectWinEvent(win.id, 'click ' + target);
+    win.__lastClick = { t: now, type, target, lx, ly };
   },
   onKeyDown(e, win, wm) {
     const sys = win.__sys;

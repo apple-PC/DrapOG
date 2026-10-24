@@ -90,6 +90,8 @@ entry fn main() -> i32 {
   let iy = 0
   let tx = 0
   let ty = 0
+  let cellLeft = 0
+  let cellTop = 0
   let leftW = 0
   let rightX = 0
 }
@@ -285,19 +287,19 @@ event fn on_paint() {
     while (i < n) {
       row = i / cols
       col = i - row * cols
-      ix = startX + col * cellW
-      iy = startY + row * cellH
-      itemX.push(ix)
-      itemY.push(iy)
+      cellLeft = startX + col * cellW
+      cellTop = startY + row * cellH
+      itemX.push(cellLeft)
+      itemY.push(cellTop)
       itemW.push(cellW)
       itemH.push(cellH)
       itemCount = itemCount + 1
-      if (i == sel) { syscall win_theme(4); syscall win_fill_rect(ix, iy, cellW, cellH) }
+      if (i == sel) { syscall win_theme(4); syscall win_fill_rect(cellLeft, cellTop, cellW, cellH) }
       name = items[i]
       isDir = 0
       if (substr(name, len(name) - 1, 1) == "/") { isDir = 1 }
-      ix = ix + (cellW - iconSize) / 2
-      iy = iy + 8
+      ix = cellLeft + (cellW - iconSize) / 2
+      iy = cellTop + 8
       if (isDir == 1 && len(name) >= 4 && substr(name, len(name) - 4, 4) == ".app") { syscall win_glyph("app", ix, iy, iconSize) }
       else if (isDir == 1) { syscall win_glyph("folder", ix, iy, iconSize) }
       else { syscall win_glyph("file", ix, iy, iconSize) }
@@ -305,7 +307,9 @@ event fn on_paint() {
       syscall win_set_font(12)
       base = name
       if (isDir == 1) { base = substr(name, 0, len(name) - 1) }
-      tx = ix + (cellW - iconSize) / 2 + 4
+      // 标签按单元格居中（估算字号 12 ≈ 7px/字），避免之前双重偏移导致的"歪"
+      tx = cellLeft + (cellW - len(base) * 7) / 2
+      if (tx < cellLeft + 2) { tx = cellLeft + 2 }
       ty = iy + iconSize + 8
       syscall win_text(tx, ty, base)
       i = i + 1
@@ -382,6 +386,9 @@ event fn on_paint() {
 
 event fn on_click(ev: str) {
   let parts = split(ev, " ")
+  // 双击事件透传：dblclick <id>（工具栏，忽略）或 dblclick <x> <y>（内容区，打开选中项）
+  let isDbl = 0
+  if (len(parts) >= 1 && parts[0] == "dblclick") { isDbl = 1 }
   if (viewerContent != 0) {
     if (len(parts) >= 2 && parts[1] == "关闭") { viewerContent = 0; viewerName = ""; viewerScroll = 0 }
     syscall win_invalidate(win); return 0
@@ -395,7 +402,7 @@ event fn on_click(ev: str) {
   if (len(parts) >= 3) {
     x = atoi(parts[1])
     y = atoi(parts[2])
-    if (x < SIDEBAR_W && y >= TOOLBAR_H) {
+    if (isDbl == 0 && x < SIDEBAR_W && y >= TOOLBAR_H) {
       j = 0
       while (j < sbCount) {
         if (y >= sbY[j] - 2 && y <= sbY[j] + 24) {
@@ -423,10 +430,39 @@ event fn on_click(ev: str) {
         j = j + 1
       }
       if (found >= 0) { sel = found; status = "" } else { sel = -1 }
-      syscall win_invalidate(win); return 0
+      // 双击内容区：打开选中项（文件夹进入 / 文件预览 / .app 启动）
+      if (isDbl == 1 && found >= 0) {
+        name = items[sel]
+        if (len(name) > 0) {
+          isDir = 0
+          if (substr(name, len(name) - 1, 1) == "/") { isDir = 1 }
+          base = name
+          if (isDir == 1) { base = substr(name, 0, len(name) - 1) }
+          target = syscall fs_realpath(cwd, base)
+          if (isDir == 1 && len(name) >= 4 && substr(name, len(name) - 4, 4) == ".app") {
+            syscall win_app_launch(base)
+            status = "启动 " + base
+          } else if (isDir == 1) {
+            if (substr(target, 0, 8) == "/System" && sysAccess == 0) { permTarget = target }
+            else {
+              nh = []
+              k = 0
+              while (k <= hpos) { nh.push(hist[k]); k = k + 1 }
+              nh.push(target); hist = nh; hpos = len(hist) - 1
+              cwd = target; sel = -1; status = ""
+              if (substr(target, 0, 8) == "/System") { sysAccess = 0 } else { sysAccess = 1 }
+            }
+          } else {
+            viewerName = base; reader = syscall fs_read(target)
+            if (reader != 0) { viewerContent = reader; viewerScroll = 0 } else { status = "无法读取: " + base }
+          }
+        }
+      }
     }
     syscall win_invalidate(win); return 0
   }
+  // 双击工具栏按钮无意义，忽略
+  if (isDbl == 1) { syscall win_invalidate(win); return 0 }
   id = parts[1]
   if (id == "back") { if (hpos > 0) { hpos = hpos - 1; cwd = hist[hpos]; sel = -1; status = "" } }
   else if (id == "forward") { if (hpos < len(hist) - 1) { hpos = hpos + 1; cwd = hist[hpos]; sel = -1; status = "" } }

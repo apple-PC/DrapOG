@@ -51,6 +51,14 @@ function cUnquote(s) {
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
+// 经本地代理出网时，Node 原生 fetch 不会自动读取 HTTPS_PROXY/HTTP_PROXY，
+// 需手动挂 undici 的 ProxyAgent。无代理环境（直连）则跳过，fetch 正常工作。
+try {
+  const { setGlobalDispatcher, ProxyAgent } = await import('undici');
+  const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (proxy) { setGlobalDispatcher(new ProxyAgent(proxy)); console.error('[proxy] 经代理出网:', proxy); }
+} catch (_) { /* undici 未安装或无需代理：保持直连 */ }
+
 if (!TOKEN) { console.error('缺少环境变量 GITHUB_TOKEN'); process.exit(1); }
 
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();

@@ -106,6 +106,18 @@ async function testFinder() {
     sys.injectWinEvent(win.id, 'click open'); await settle();
     ok(texts(st).some(x => x === 'readme.txt'), '打开文本文件进入预览视图（标题显示 readme.txt）');
   }
+
+  // D. 双击直接打开（内容区 dblclick 透传）：在列表视图双击 readme.txt 行，应直接进入预览
+  sys = launchDrapAppProgram(wm, vfs, compile('Finder'), null, '/Users/guest');
+  win = wm.getWin(); st = sys.drapWins.get(win.id);
+  await settle();
+  await toList(sys, win);
+  const dblY = rowYOf(st, 'readme.txt');
+  ok(dblY >= 0, 'D: 列表含 readme.txt');
+  if (dblY >= 0) {
+    sys.injectWinEvent(win.id, 'dblclick 220 ' + (dblY + 10)); await settle();
+    ok(texts(st).some(x => x === 'readme.txt'), 'D: 双击文本文件直接进入预览视图（标题显示 readme.txt）');
+  }
 }
 
 async function testSoftKeyboard() {

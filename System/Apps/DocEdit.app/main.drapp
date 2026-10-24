@@ -4,6 +4,8 @@
 // 格式工具栏：新建 / 打开 / 保存、粗体 / 斜体 / 下划线（逐行样式，渲染生效）、
 // 字号 ±、左 / 中 / 右 对齐（逐行）、撤销 / 重做、复制 / 剪切 / 粘贴。
 // 模型：main 初始化共享状态；on_paint 自绘；on_key / on_click / on_menu 处理输入与菜单动作。
+import str
+
 entry fn main() -> i32 {
     let win = syscall win_create("DocEdit 文档编辑器", 720, 520)
     syscall win_mono(1)
@@ -65,6 +67,22 @@ entry fn main() -> i32 {
     let b = 0
     let ii = 0
     let uu = 0
+    // 文件选择器（模态）：0 关闭 / 1 打开 / 2 保存
+    let picker = 0
+    let pDir = "/Users/guest/Documents"
+    let pItems = [""]
+    let pIsDir = [0]
+    let pSel = -1
+    let pX = [0]
+    let pY = [0]
+    let pW = [0]
+    let pH = [0]
+    let pCount = 0
+    let pName = ""
+    let name = ""
+    let target = ""
+    let found = -1
+    let base = ""
 }
 
 // 把当前完整文档状态编码为字符串（用于撤销 / 重做快照），结果写入 snap
@@ -150,9 +168,77 @@ event fn on_paint() {
     syscall win_theme(1)
     syscall win_set_font(11)
     syscall win_text(8, h - 18, "行 " + itoa(row + 1) + "/" + itoa(len(lines)) + "  列 " + itoa(col) + "  字符 " + itoa(total) + "  字号 " + itoa(sizes[row]) + "  " + eff + mark)
+
+    // ===== 文件选择器（模态）=====
+    if (picker != 0) {
+        syscall win_set_color(0, 0, 0)
+        syscall win_fill_rect(0, 0, w, h)
+        let pw = 460
+        let ph = 340
+        let px = (w - pw) / 2
+        let py = (h - ph) / 2
+        syscall win_set_color(40, 40, 46)
+        syscall win_fill_rect(px, py, pw, ph)
+        syscall win_theme(1)
+        syscall win_set_font(15)
+        if (picker == 1) { syscall win_text(px + 16, py + 16, "打开文件") } else { syscall win_text(px + 16, py + 16, "保存文件") }
+        syscall win_set_font(11)
+        syscall win_set_color(150, 150, 160)
+        syscall win_text(px + 16, py + 42, pDir)
+        syscall win_button("pUp", px + pw - 92, py + 34, 76, 24)
+        // 目录列表
+        let lsr = syscall fs_ls(pDir)
+        let raw = [""]
+        if (lsr != 0) { raw = split(lsr, "\n") } else { raw = [] }
+        pItems = []
+        pIsDir = []
+        i = 0
+        while (i < len(raw)) {
+            if (len(raw[i]) > 0) {
+                pItems.push(raw[i])
+                if (substr(raw[i], len(raw[i]) - 1, 1) == "/") { pIsDir.push(1) } else { pIsDir.push(0) }
+            }
+            i = i + 1
+        }
+        pCount = len(pItems)
+        pX = []; pY = []; pW = []; pH = []
+        let lx0 = px + 12
+        let ly0 = py + 70
+        let rh = 28
+        i = 0
+        while (i < pCount) {
+            pX.push(lx0); pY.push(ly0 + i * rh); pW.push(pw - 24); pH.push(rh)
+            if (i == pSel) { syscall win_theme(4); syscall win_fill_rect(lx0, ly0 + i * rh, pw - 24, rh) }
+            let nm = pItems[i]
+            let isd = pIsDir[i]
+            let gname = "file"
+            if (isd == 1 && len(nm) >= 4 && substr(nm, len(nm) - 4, 4) == ".app") { gname = "app" }
+            else if (isd == 1) { gname = "folder" }
+            syscall win_glyph(gname, lx0 + 4, ly0 + i * rh + 4, 20)
+            syscall win_theme(1)
+            syscall win_set_font(13)
+            let disp = nm
+            if (isd == 1) { disp = substr(nm, 0, len(nm) - 1) }
+            syscall win_text(lx0 + 30, ly0 + i * rh + 7, disp)
+            i = i + 1
+        }
+        // 底部按钮 / 文件名输入
+        if (picker == 1) {
+            syscall win_button("pOpen", px + pw - 168, py + ph - 38, 76, 28)
+            syscall win_button("pCancel", px + pw - 84, py + ph - 38, 72, 28)
+        } else {
+            syscall win_input("pName", px + 16, py + ph - 40, pw - 200, 26)
+            syscall win_button("pSave", px + pw - 168, py + ph - 38, 76, 28)
+            syscall win_button("pCancel", px + pw - 84, py + ph - 38, 72, 28)
+        }
+    }
 }
 
 event fn on_key(ev: str) {
+    if (picker != 0) {
+        if (ev == "key Escape") { picker = 0 }
+        syscall win_invalidate(win); return 0
+    }
     if (ev == "key ") { k = " " }
     else { k = substr(ev, 4) }
     // 是否为改变内容的按键（需记录撤销快照）
@@ -257,6 +343,77 @@ event fn on_click(ev: str) {
     let parts2 = split(ev, " ")
     if (len(parts2) >= 2) { id = parts2[1] } else { id = "" }
     if (len(parts2) >= 3) { x = atoi(parts2[1]); y = atoi(parts2[2]) } else { x = -1; y = -1 }
+    // ===== 文件选择器优先处理（模态期间拦截一切编辑操作）=====
+    if (picker != 0) {
+        if (id == "pUp") {
+            pDir = syscall fs_realpath(pDir, "..")
+            pSel = -1
+        } else if (id == "pCancel") {
+            picker = 0
+        } else if (id == "pOpen") {
+            if (pSel >= 0 && pSel < pCount && pIsDir[pSel] == 0) {
+                target = syscall fs_realpath(pDir, pItems[pSel])
+                // 记录撤销快照
+                snap = ""
+                i = 0
+                while (i < len(lines)) {
+                    if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
+                    else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                    i = i + 1
+                }
+                snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
+                snap = snap + "\n##P" + path
+                undoStack.push(snap)
+                redoStack = []
+                c = syscall fs_read(target)
+                if (c != 0) {
+                    lines = split(c, "\n")
+                    bArr = []; iArr = []; uArr = []; aligns = []; sizes = []
+                    i = 0
+                    while (i < len(lines)) { bArr.push(0); iArr.push(0); uArr.push(0); aligns.push(0); sizes.push(15); i = i + 1 }
+                    path = target; row = 0; col = 0; scroll = 0; dirty = 0
+                    syscall win_set_input("path", target)
+                }
+            }
+            picker = 0
+        } else if (id == "pSave") {
+            name = syscall win_input_get("pName")
+            if (len(name) > 0) {
+                target = syscall fs_realpath(pDir, name)
+                content = ""
+                i = 0
+                while (i < len(lines)) {
+                    if (i == 0) { content = lines[i] } else { content = content + "\n" + lines[i] }
+                    i = i + 1
+                }
+                syscall fs_write(target, content)
+                path = target; dirty = 0
+                syscall win_set_input("path", target)
+            }
+            picker = 0
+        } else if (id == "pName") {
+            // 输入框聚焦，无需处理
+        } else {
+            // 列表行点击（坐标命中）：单击选择；文件夹则进入
+                if (len(parts2) >= 3) {
+                i = 0; found = -1
+                while (i < pCount) {
+                    if (x >= pX[i] && x <= pX[i] + pW[i] && y >= pY[i] && y <= pY[i] + pH[i]) { found = i }
+                    i = i + 1
+                }
+                if (found >= 0) {
+                    pSel = found
+                    if (pIsDir[found] == 1) {
+                        name = pItems[found]
+                        pDir = syscall fs_realpath(pDir, substr(name, 0, len(name) - 1))
+                        pSel = -1
+                    }
+                }
+            }
+        }
+        syscall win_invalidate(win); return 0
+    }
+
     if (id == "docNew") {
         snap = ""
         i = 0
@@ -275,47 +432,51 @@ event fn on_click(ev: str) {
         syscall win_set_input("path", path)
         syscall win_invalidate(win)
     } else if (id == "docOpen") {
-        eff = syscall win_input_get("path")
-        if (eff == "") { eff = path }
-        n = syscall fs_exists(eff)
-        if (n == 1) {
-            snap = ""
-            i = 0
-            while (i < len(lines)) {
-                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
-                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
-                i = i + 1
-            }
-            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
-            snap = snap + "\n##P" + path
-            undoStack.push(snap)
-            redoStack = []
-            c = syscall fs_read(eff)
-            lines = split(c, "\n")
-            bArr = []
-            iArr = []
-            uArr = []
-            aligns = []
-            sizes = []
-            i = 0
-            while (i < len(lines)) { bArr.push(0); iArr.push(0); uArr.push(0); aligns.push(0); sizes.push(15); i = i + 1 }
-            path = eff
-            row = 0; col = 0; scroll = 0; dirty = 0
-        }
+        // 打开文件选择器（浏览 + 选择）
+        if (len(path) > 0 && contains(path, "/")) {
+            base = path
+            found = len(base)
+            while (found > 0 && substr(base, found - 1, 1) != "/") { found = found - 1 }
+            pDir = substr(base, 0, found)
+            if (len(pDir) > 0 && substr(pDir, len(pDir) - 1, 1) == "/") { pDir = substr(pDir, 0, len(pDir) - 1) }
+            if (len(pDir) == 0) { pDir = "/" }
+        } else { pDir = "/Users/guest/Documents" }
+        pSel = -1
+        picker = 1
         syscall win_invalidate(win)
     } else if (id == "docSave") {
         eff = syscall win_input_get("path")
         if (eff == "") { eff = path }
-        content = ""
-        i = 0
-        while (i < len(lines)) {
-            if (i == 0) { content = lines[i] }
-            else { content = content + "\n" + lines[i] }
-            i = i + 1
+        if (syscall fs_exists(eff) == 1) {
+            content = ""
+            i = 0
+            while (i < len(lines)) {
+                if (i == 0) { content = lines[i] }
+                else { content = content + "\n" + lines[i] }
+                i = i + 1
+            }
+            syscall fs_write(eff, content)
+            path = eff
+            dirty = 0
+            syscall win_set_input("path", eff)
+        } else {
+            // 保存对话框：选择目录 + 输入文件名
+            if (len(eff) > 0 && contains(eff, "/")) {
+                base = eff
+                found = len(base)
+                while (found > 0 && substr(base, found - 1, 1) != "/") { found = found - 1 }
+                pDir = substr(base, 0, found)
+                if (len(pDir) > 0 && substr(pDir, len(pDir) - 1, 1) == "/") { pDir = substr(pDir, 0, len(pDir) - 1) }
+                if (len(pDir) == 0) { pDir = "/" }
+                pName = substr(base, found)
+            } else {
+                pDir = "/Users/guest/Documents"
+                pName = "未命名.txt"
+            }
+            syscall win_set_input("pName", pName)
+            pSel = -1
+            picker = 2
         }
-        syscall fs_write(eff, content)
-        path = eff
-        dirty = 0
         syscall win_invalidate(win)
     } else if (id == "path") {
         syscall win_invalidate(win)
@@ -394,42 +555,48 @@ event fn on_menu(ev: str) {
         path = "/Users/guest/Documents/未命名.txt"
         syscall win_set_input("path", path)
     } else if (act == "open") {
-        eff = syscall win_input_get("path")
-        if (eff == "") { eff = path }
-        n = syscall fs_exists(eff)
-        if (n == 1) {
-            snap = ""
+        // 打开文件选择器
+        if (len(path) > 0 && contains(path, "/")) {
+            base = path
+            found = len(base)
+            while (found > 0 && substr(base, found - 1, 1) != "/") { found = found - 1 }
+            pDir = substr(base, 0, found)
+            if (len(pDir) > 0 && substr(pDir, len(pDir) - 1, 1) == "/") { pDir = substr(pDir, 0, len(pDir) - 1) }
+            if (len(pDir) == 0) { pDir = "/" }
+        } else { pDir = "/Users/guest/Documents" }
+        pSel = -1
+        picker = 1
+    } else if (act == "save") {
+        eff = path
+        if (syscall fs_exists(eff) == 1) {
+            content = ""
             i = 0
             while (i < len(lines)) {
-                if (i == 0) { snap = lines[0] + "\t" + itoa(bArr[0]) + "," + itoa(iArr[0]) + "," + itoa(uArr[0]) + "," + itoa(aligns[0]) + "," + itoa(sizes[0]) }
-                else { snap = snap + "\n" + lines[i] + "\t" + itoa(bArr[i]) + "," + itoa(iArr[i]) + "," + itoa(uArr[i]) + "," + itoa(aligns[i]) + "," + itoa(sizes[i]) }
+                if (i == 0) { content = lines[i] }
+                else { content = content + "\n" + lines[i] }
                 i = i + 1
             }
-            snap = snap + "\n##" + itoa(row) + "," + itoa(col) + "," + itoa(scroll) + "," + itoa(dirty)
-            snap = snap + "\n##P" + path
-            undoStack.push(snap)
-            redoStack = []
-            c = syscall fs_read(eff)
-            lines = split(c, "\n")
-            bArr = []; iArr = []; uArr = []; aligns = []; sizes = []
-            i = 0
-            while (i < len(lines)) { bArr.push(0); iArr.push(0); uArr.push(0); aligns.push(0); sizes.push(15); i = i + 1 }
+            syscall fs_write(eff, content)
             path = eff
-            row = 0; col = 0; scroll = 0; dirty = 0
+            dirty = 0
+            syscall win_set_input("path", eff)
+        } else {
+            if (len(eff) > 0 && contains(eff, "/")) {
+                base = eff
+                found = len(base)
+                while (found > 0 && substr(base, found - 1, 1) != "/") { found = found - 1 }
+                pDir = substr(base, 0, found)
+                if (len(pDir) > 0 && substr(pDir, len(pDir) - 1, 1) == "/") { pDir = substr(pDir, 0, len(pDir) - 1) }
+                if (len(pDir) == 0) { pDir = "/" }
+                pName = substr(base, found)
+            } else {
+                pDir = "/Users/guest/Documents"
+                pName = "未命名.txt"
+            }
+            syscall win_set_input("pName", pName)
+            pSel = -1
+            picker = 2
         }
-    } else if (act == "save") {
-        eff = syscall win_input_get("path")
-        if (eff == "") { eff = path }
-        content = ""
-        i = 0
-        while (i < len(lines)) {
-            if (i == 0) { content = lines[i] }
-            else { content = content + "\n" + lines[i] }
-            i = i + 1
-        }
-        syscall fs_write(eff, content)
-        path = eff
-        dirty = 0
     } else if (act == "undo") {
         if (len(undoStack) > 0) {
             snap = ""
