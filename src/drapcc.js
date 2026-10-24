@@ -58,6 +58,7 @@ const SYS_TABLE = {
   'win_set_theme':      0x58, // 切换系统主题：win_set_theme("macos"|"windows")
   'win_open_finder':    0x59, // 在 Finder 打开路径：win_open_finder(path)
   'win_set_softkeyboard':0x5a, // 切换软键盘：win_set_softkeyboard(0|1)
+  'win_glyph':          0x84, // 绘制手绘图标：win_glyph(name, x, y, size) → drawOp 'glyph'
   'win_get_theme':      0x5b, // 读取当前主题：返回 0=macos 1=windows（设置 App 启动高亮用）
   'win_get_softkeyboard':0x5c,
   'win_set_style':      0x5f, // 设置文本样式：win_set_style(bold, italic, underline) 0/1
@@ -174,6 +175,7 @@ const SYS_RET = {
   'win_app_icon':        { kind: 'prim', name: 'i32' },
   'win_trash':           { kind: 'prim', name: 'i32' },
   'win_set_style':        { kind: 'prim', name: 'i32' },
+  'win_glyph':            { kind: 'prim', name: 'i32' },
   'win_get_open_path':    { kind: 'prim', name: 'str' },
   'args_count': { kind: 'prim', name: 'i32' },
   'args_get':    { kind: 'prim', name: 'str' },
@@ -236,6 +238,7 @@ const SYS_ARGS = {
   'win_app_icon':         4,
   'win_trash':            1,
   'win_set_style':         3,
+  'win_glyph':             4,
   'win_get_open_path':     0,
   'args_count': 0,
   'args_get':   1,

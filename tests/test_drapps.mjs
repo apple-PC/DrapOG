@@ -91,11 +91,11 @@ async function testTrash() {
   // 选中第 0 行（y=48 → sel=0）
   sys.injectWinEvent(win.id, 'click 12 48'); await settle();
   // 还原
-  sys.injectWinEvent(win.id, 'click 还原'); await settle();
+  sys.injectWinEvent(win.id, 'click restore'); await settle();
   ok((await vfs.read('/Users/guest/note.txt')) === 'hello trash', '还原后文件回到 /Users/guest/note.txt');
   ok((await vfs.exists('/Library/Trash/note.txt')) === false, '还原后废纸篓内文件被移出');
   // 清空（此时为空）
-  sys.injectWinEvent(win.id, 'click 清空'); await settle();
+  sys.injectWinEvent(win.id, 'click trash'); await settle();
   const texts = st.drawOps.filter(o => o.op === 'text').map(o => o.text);
   ok(texts.some(x => /废纸篓为空/.test(x)), '清空后显示「废纸篓为空」');
   sys.injectWinEvent(win.id, 'close'); await settle();

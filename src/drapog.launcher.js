@@ -12,6 +12,7 @@ import { DrapCC } from './drapcc.js';
 import { VM } from './drapog.vm.js';
 import { DrapSYS } from './drapog.sys.js';
 import { makeLineWriter } from './drapog.stream.js';
+import { drawGlyph, isGlyph } from './drapog.glyphs.js';
 
 // 颜色数组 → CSS rgb 串
 function _rgb(c) {
@@ -56,17 +57,27 @@ export const drapAppBridge = {
       } else if (op.op === 'icon') {
         // 应用手绘图标（macOS squircle）；无规格时 drawAppIcon 退回字母渲染
         if (wm && typeof wm.drawAppIcon === 'function') wm.drawAppIcon(op.id, op.x, op.y, op.size);
+      } else if (op.op === 'glyph') {
+        // 手绘图标（文件/文件夹/动作等），颜色随当前绘制色（语义图标内部固定配色）
+        drawGlyph(ctx, op.name, op.x, op.y, op.size, { color: _rgb(st.style.color) });
       }
     }
     // 2) 声明式控件（标准样式，宿主自动绘制）
     for (const c of st.controls) {
       if (c.type === 'button') {
-        ctx.fillStyle = 'rgba(10,132,255,0.95)';
-        wm.roundRect(c.x, c.y, c.w, c.h, 6); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = '13px -apple-system, sans-serif';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(c.id, c.x + c.w / 2, c.y + c.h / 2);
+        if (isGlyph(c.id)) {
+          // 手绘图标按钮：macOS 风格图标型（无蓝底），颜色取主题前景色
+          const fg = (wm && wm.T && wm.T.palette) ? _rgb(Array.isArray(wm.T.palette) ? wm.T.palette[1] : wm.T.palette.fg) : '#e8e8ed';
+          const s = Math.min(c.w, c.h) - 6;
+          drawGlyph(ctx, c.id, c.x + (c.w - s) / 2, c.y + (c.h - s) / 2, s, { color: fg });
+        } else {
+          ctx.fillStyle = 'rgba(10,132,255,0.95)';
+          wm.roundRect(c.x, c.y, c.w, c.h, 6); ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = '13px -apple-system, sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(c.id, c.x + c.w / 2, c.y + c.h / 2);
+        }
       } else if (c.type === 'label') {
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.font = '13px -apple-system, sans-serif';

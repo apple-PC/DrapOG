@@ -78,40 +78,27 @@ event fn on_paint() {
     // 工具栏底色
     syscall win_theme(3)
     syscall win_fill_rect(0, 0, w, 56)
-    // 第一行：新建 / 打开 / 保存 / 路径
-    syscall win_button("新建", 8, 4, 56, 22)
-    syscall win_button("打开", 72, 4, 56, 22)
-    syscall win_button("保存", 136, 4, 56, 22)
+    // 第一行：新建 / 打开 / 保存 / 路径（图标按钮）
+    syscall win_button("docNew", 8, 4, 56, 22)
+    syscall win_button("docOpen", 72, 4, 56, 22)
+    syscall win_button("docSave", 136, 4, 56, 22)
     syscall win_input("path", 200, 4, w - 208, 22)
-    // 第二行：格式按钮（手绘，便于高亮激活态）
-    // 粗体 B / 斜体 I / 下划线 U
-    if (bArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(8, 30, 30, 22)
-    syscall win_theme(1); syscall win_set_font(15); syscall win_text(18, 33, "B")
-    if (iArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(42, 30, 30, 22)
-    syscall win_theme(1); syscall win_set_font(14); syscall win_text(51, 34, "I")
-    if (uArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(76, 30, 30, 22)
-    syscall win_theme(1); syscall win_set_font(14); syscall win_text(83, 34, "U")
-    // 字号 - / +
-    syscall win_set_color(82, 82, 92)
-    syscall win_fill_rect(116, 30, 40, 22)
-    syscall win_fill_rect(160, 30, 40, 22)
-    syscall win_theme(1); syscall win_set_font(13)
-    syscall win_text(126, 34, "A-")
-    syscall win_text(170, 34, "A+")
-    // 对齐 左 / 中 / 右
-    if (aligns[row] == 0) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(206, 30, 30, 22)
-    if (aligns[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(240, 30, 30, 22)
-    if (aligns[row] == 2) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(82, 82, 92) }
-    syscall win_fill_rect(274, 30, 30, 22)
-    syscall win_theme(1); syscall win_set_font(13)
-    syscall win_text(214, 34, "左")
-    syscall win_text(248, 34, "中")
-    syscall win_text(282, 34, "右")
+    // 第二行：格式按钮（手绘图标，激活态用强调色，未激活用中性灰；坐标命中见 on_click）
+    if (bArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("bold", 13, 31, 20)
+    if (iArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("italic", 47, 31, 20)
+    if (uArr[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("underline", 81, 31, 20)
+    syscall win_set_color(150, 150, 160)
+    syscall win_glyph("fontMinus", 126, 31, 20)
+    syscall win_glyph("fontPlus", 170, 31, 20)
+    if (aligns[row] == 0) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("alignLeft", 211, 31, 20)
+    if (aligns[row] == 1) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("alignCenter", 245, 31, 20)
+    if (aligns[row] == 2) { syscall win_set_color(10, 132, 255) } else { syscall win_set_color(150, 150, 160) }
+    syscall win_glyph("alignRight", 279, 31, 20)
     // 文本区（逐行渲染：字号 / 样式 / 对齐）
     vis = (h - 60 - 22) / LINEH
     i = scroll
@@ -270,7 +257,7 @@ event fn on_click(ev: str) {
     let parts2 = split(ev, " ")
     if (len(parts2) >= 2) { id = parts2[1] } else { id = "" }
     if (len(parts2) >= 3) { x = atoi(parts2[1]); y = atoi(parts2[2]) } else { x = -1; y = -1 }
-    if (id == "新建") {
+    if (id == "docNew") {
         snap = ""
         i = 0
         while (i < len(lines)) {
@@ -287,7 +274,7 @@ event fn on_click(ev: str) {
         path = "/Users/guest/Documents/未命名.txt"
         syscall win_set_input("path", path)
         syscall win_invalidate(win)
-    } else if (id == "打开") {
+    } else if (id == "docOpen") {
         eff = syscall win_input_get("path")
         if (eff == "") { eff = path }
         n = syscall fs_exists(eff)
@@ -316,7 +303,7 @@ event fn on_click(ev: str) {
             row = 0; col = 0; scroll = 0; dirty = 0
         }
         syscall win_invalidate(win)
-    } else if (id == "保存") {
+    } else if (id == "docSave") {
         eff = syscall win_input_get("path")
         if (eff == "") { eff = path }
         content = ""

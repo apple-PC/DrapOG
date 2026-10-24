@@ -54,7 +54,7 @@ async function testFinder() {
   const wm = makeWM();
 
   // 统一用列表视图做确定性断言：点击「列表」按钮切换
-  const toList = async (sys, win) => { sys.injectWinEvent(win.id, 'click 列表'); await settle(); };
+  const toList = async (sys, win) => { sys.injectWinEvent(win.id, 'click viewList'); await settle(); };
   // 内容区选中第 i 行（列表视图行 y = TOOLBAR_H+8+i*30，文字在 +8；点 x=220 落在内容区且落在行内）
   const selectRow = (sys, win, y) => sys.injectWinEvent(win.id, 'click 220 ' + (y + 10));
 
@@ -64,11 +64,11 @@ async function testFinder() {
   await settle();
   ok(st.drawOps.length > 0, 'Finder 首帧已绘制');
   await toList(sys, win);
-  sys.injectWinEvent(win.id, 'click 新文件夹'); await settle();
+  sys.injectWinEvent(win.id, 'click newfolder'); await settle();
   for (const ch of ['M','y']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
   sys.injectWinEvent(win.id, 'key Enter'); await settle();
   ok((await vfs.exists('/Users/guest/My')) === true, '新建文件夹 /Users/guest/My 已创建');
-  sys.injectWinEvent(win.id, 'click 新文件'); await settle();
+  sys.injectWinEvent(win.id, 'click newfile'); await settle();
   for (const ch of ['a','.','t','x','t']) { sys.injectWinEvent(win.id, 'key ' + ch); await settle(); }
   sys.injectWinEvent(win.id, 'key Enter'); await settle();
   ok((await vfs.exists('/Users/guest/a.txt')) === true, '新建文本 /Users/guest/a.txt 已创建');
@@ -82,14 +82,14 @@ async function testFinder() {
   ok(sysRowY >= 0, '根目录列表含 /System');
   if (sysRowY >= 0) {
     selectRow(sys, win, sysRowY); await settle();
-    sys.injectWinEvent(win.id, 'click 打开'); await settle();
+    sys.injectWinEvent(win.id, 'click open'); await settle();
     ok(texts(st).some(x => x === '需要权限'), '点击 /System「打开」弹出权限弹窗（显示「需要权限」）');
     sys.injectWinEvent(win.id, 'click 允许'); await settle();
     const biosY = rowYOf(st, 'BIOS');
     ok(biosY >= 0, '允许后进入 /System，列表含 BIOS');
     if (biosY >= 0) {
       selectRow(sys, win, biosY); await settle();
-      sys.injectWinEvent(win.id, 'click 删除'); await settle();
+      sys.injectWinEvent(win.id, 'click trash'); await settle();
       ok(texts(st).some(x => x.includes('系统目录受保护')), '在 /System 内删除被拒，提示「系统目录受保护」');
     }
   }
@@ -103,7 +103,7 @@ async function testFinder() {
   ok(readmeY >= 0, 'openPath=/Users/guest 启动后列表含 readme.txt');
   if (readmeY >= 0) {
     selectRow(sys, win, readmeY); await settle();
-    sys.injectWinEvent(win.id, 'click 打开'); await settle();
+    sys.injectWinEvent(win.id, 'click open'); await settle();
     ok(texts(st).some(x => x === 'readme.txt'), '打开文本文件进入预览视图（标题显示 readme.txt）');
   }
 }

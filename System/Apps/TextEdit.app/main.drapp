@@ -38,9 +38,9 @@ event fn on_paint() {
     // 工具栏
     syscall win_theme(3)
     syscall win_fill_rect(0, 0, W, 34)
-    syscall win_button("新建", 8, 4, 48, 26)
-    syscall win_button("打开", 64, 4, 48, 26)
-    syscall win_button("保存", 120, 4, 48, 26)
+    syscall win_button("docNew", 8, 4, 48, 26)
+    syscall win_button("docOpen", 64, 4, 48, 26)
+    syscall win_button("docSave", 120, 4, 48, 26)
     // 路径栏
     syscall win_theme(3)
     syscall win_fill_rect(0, 34, W, 26)
@@ -103,14 +103,14 @@ event fn on_key(ev: str) {
 
 event fn on_click(ev: str) {
     id = split(ev, " ")[1]
-    if (id == "新建") { text = ""; status = "已新建" }
-    else if (id == "打开") {
+    if (id == "docNew") { text = ""; status = "已新建" }
+    else if (id == "docOpen") {
         eff = syscall win_input_get("path")
         content = syscall fs_read(eff)
         if (content != 0) { text = content; status = "已打开 " + eff }
         else { status = "打开失败 / 不存在" }
     }
-    else if (id == "保存") {
+    else if (id == "docSave") {
         eff = syscall win_input_get("path")
         syscall fs_write(eff, text)
         status = "已保存 " + eff

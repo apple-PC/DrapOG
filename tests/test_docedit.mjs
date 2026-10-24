@@ -64,7 +64,7 @@ async function run() {
   ok(texts.some(t => t === 'Worl') && !texts.some(t => t === 'World'), '退格删除末尾字符 → "Worl"');
 
   // 保存（路径输入框已被 main 预填默认值）
-  sys.injectWinEvent(win.id, 'click 保存'); await settle();
+  sys.injectWinEvent(win.id, 'click docSave'); await settle();
   // 找到保存的路径（默认 /Users/guest/Documents/未命名.txt）
   const savedPath = '/Users/guest/Documents/未命名.txt';
   const saved = await vfs.read(savedPath);
@@ -72,7 +72,7 @@ async function run() {
   ok(saved === 'Hello\nWorl', '保存内容正确（Hello\\nWorl）: ' + JSON.stringify(saved));
 
   // 打开：先清空再重新加载，校验读取路径
-  sys.injectWinEvent(win.id, 'click 打开'); await settle();
+  sys.injectWinEvent(win.id, 'click docOpen'); await settle();
   texts = st.drawOps.filter(o => o.op === 'text').map(o => o.text);
   ok(texts.some(t => t === 'Hello') && texts.some(t => t === 'Worl'), '打开后重新渲染保存的内容');
 

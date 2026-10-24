@@ -15,6 +15,7 @@ entry fn main() -> i32 {
     let x = 0
     let y = 0
     let id = ""
+    let parts = ["", "", ""]
     let ry = 0
 }
 
@@ -27,8 +28,8 @@ event fn on_paint() {
     // 工具栏
     syscall win_theme(3)
     syscall win_fill_rect(0, 0, W, 36)
-    syscall win_button("还原", 8, 4, 64, 28)
-    syscall win_button("清空", 80, 4, 64, 28)
+    syscall win_button("restore", 8, 4, 64, 28)
+    syscall win_button("trash", 80, 4, 64, 28)
     // 列表
     list = split(syscall fs_ls("/Library/Trash"), "\n")
     n = len(list)
@@ -40,8 +41,7 @@ event fn on_paint() {
             empty = 0
             ry = 44 + i * 28
             if (i == sel) { syscall win_theme(4); syscall win_fill_rect(0, ry, W, 28) }
-            syscall win_theme(2)
-            syscall win_fill_rect(14, ry + 7, 14, 14)
+            syscall win_glyph("file", 12, ry + 6, 16)
             syscall win_theme(1)
             syscall win_set_font(15)
             syscall win_text(38, ry + 4, name)
@@ -63,7 +63,7 @@ event fn on_paint() {
 
 event fn on_click(ev: str) {
     id = split(ev, " ")[1]
-    if (id == "还原") {
+    if (id == "restore") {
         if (sel >= 0) {
             list = split(syscall fs_ls("/Library/Trash"), "\n")
             name = list[sel]
@@ -75,7 +75,7 @@ event fn on_click(ev: str) {
         syscall win_invalidate(win)
         return 0
     }
-    if (id == "清空") {
+    if (id == "trash") {
         list = split(syscall fs_ls("/Library/Trash"), "\n")
         i = 0
         while (i < len(list)) {
@@ -88,14 +88,17 @@ event fn on_click(ev: str) {
         syscall win_invalidate(win)
         return 0
     }
-    // 列表点击选中
-    x = atoi(split(ev, " ")[1])
-    y = atoi(split(ev, " ")[2])
-    if (y >= 44) {
-        sel = (y - 44) / 28
-        list = split(syscall fs_ls("/Library/Trash"), "\n")
-        if (sel >= 0 && sel < len(list) && len(list[sel]) == 0) { sel = -1 }
-        syscall win_invalidate(win)
+    // 列表点击选中（仅当事件带坐标：click x y）
+    parts = split(ev, " ")
+    if (len(parts) >= 3) {
+        x = atoi(parts[1])
+        y = atoi(parts[2])
+        if (y >= 44) {
+            sel = (y - 44) / 28
+            list = split(syscall fs_ls("/Library/Trash"), "\n")
+            if (sel >= 0 && sel < len(list) && len(list[sel]) == 0) { sel = -1 }
+            syscall win_invalidate(win)
+        }
     }
     return 0
 }

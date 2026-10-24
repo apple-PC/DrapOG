@@ -1,7 +1,9 @@
 {
-  "bootMode": "auto",
-  "timeout": 5,
-  "quickPOST": true,
+  "bootMode": "gui",
+  "timeout": 2,
+  "quickPOST": false,
   "bootLogo": true,
-  "secureBoot": false
+  "secureBoot": false,
+  "theme": "macos",
+  "softKeyboard": false
 }

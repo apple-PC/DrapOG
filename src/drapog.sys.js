@@ -108,6 +108,7 @@ export class DrapSYS {
       0x81: this.win_app_launch.bind(this),       // 启动应用（id）
       0x82: this.win_shell_exec.bind(this),       // 执行宿主命令（返回捕获的输出文本）
       0x83: this.win_app_icon.bind(this),         // 绘制应用图标（id, x, y, size）
+      0x84: this.win_glyph.bind(this),            // 绘制手绘图标（name, x, y, size）
       0x85: this.win_trash.bind(this),            // 把路径移入废纸篓（path）
       0x86: this.win_get_open_path.bind(this),     // 读取本窗口透传的初始打开路径（openFinderAt 用）
       0x60: this.args_count.bind(this),
@@ -523,6 +524,14 @@ export class DrapSYS {
     const st = this._cur();
     if (!st) return 0;
     st.drawOps.push({ op: 'icon', id: this.vm.readStr(idPtr), x, y, size });
+    return 1;
+  }
+
+  // 绘制手绘图标（文件/文件夹/动作等）：入队 'glyph' drawOp，由宿主桥接重放时按 z 序绘制
+  win_glyph(namePtr, x, y, size) {
+    const st = this._cur();
+    if (!st) return 0;
+    st.drawOps.push({ op: 'glyph', name: this.vm.readStr(namePtr), x, y, size });
     return 1;
   }
 
