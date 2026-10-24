@@ -29,6 +29,10 @@ const BUILTIN_TABLE = {
   111: (a) => Math.cos(a[0]),
   112: (a) => Math.log(a[0]),
   113: (a) => Math.exp(a[0]),
+  // 真浮点乘 / 除 / 取余（整数语义的 * / % 无法表达动画所需的连续值）
+  114: (a) => a[0] * a[1],
+  115: (a) => (a[1] === 0 ? 0 : a[0] / a[1]),
+  116: (a) => (a[1] === 0 ? 0 : a[0] % a[1]),
   // —— str（需 import str）——
   200: (a, vm) => vm.pushStr(vm._getStr(a[0]).toUpperCase()),
   201: (a, vm) => vm.pushStr(vm._getStr(a[0]).toLowerCase()),
@@ -300,7 +304,10 @@ export class VM {
     const { op, args } = ins;
     switch (op) {
       case 'LABEL': this.pc++; return;
-      case 'LI':   this.setR(args[0], parseInt(args[1], 10)); this.pc++; return;
+      case 'LI': {   // 立即数：整数与浮点字面量共用（此前 parseInt 会把 1.5 截成 1）
+        const n = Number(args[1]);
+        this.setR(args[0], Number.isNaN(n) ? 0 : n); this.pc++; return;
+      }
       case 'MOV':  this.setR(args[0], this.getR(args[1])); this.pc++; return;
 
       case 'ADD':  this.setR(args[0], this.opnd(args[1]) + this.opnd(args[2])); this.pc++; return;

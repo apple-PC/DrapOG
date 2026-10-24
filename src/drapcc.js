@@ -25,6 +25,7 @@ const SYS_TABLE = {
   'time_now':   0x50,
   'time_sleep': 0x54,
   'time_format':0x55,
+  'time_parts': 0x95,   // 时间分量：time_parts(ts, utc) → "Y|M|D|h|m|s|wday"
   'term_clear': 0x32,
   'term_exit':  0x33,
   'term_gui':   0x34,
@@ -63,6 +64,22 @@ const SYS_TABLE = {
   'win_get_softkeyboard':0x5c,
   'win_set_style':      0x5f, // 设置文本样式：win_set_style(bold, italic, underline) 0/1
   'win_get_open_path':  0x86, // 读取软键盘状态：返回 0=关 1=开（设置 App 启动显示用）
+  // 矢量绘图 / 帧驱动 / 音频（媒体类 DrapLang 应用：可视化、计时器）
+  'win_line':           0x87, // 直线：win_line(x1,y1,x2,y2)
+  'win_circle':         0x88, // 圆：win_circle(cx,cy,r,mode)  mode 0=填充 1=描边
+  'win_arc':            0x89, // 圆弧：win_arc(cx,cy,r,a0,a1)  角度制 0..360
+  'win_rrect':          0x8a, // 圆角矩形（填充）：win_rrect(x,y,w,h,rad)
+  'win_alpha':          0x8b, // 之后绘制的透明度：win_alpha(0..100)
+  'win_set_line':       0x8c, // 线宽：win_set_line(w)
+  'win_tick':           0x8d, // 请求逐帧重绘：win_tick(ms)（0=停止动画）
+  'win_millis':         0x8e, // 毫秒时间戳：win_millis()
+  'win_audio':          0x8f, // 播放控制：win_audio(cmd) 0=播放 1=暂停 2=停止 3=开麦 4=关麦 5=系统音
+  'win_audio_open':     0x90, // 选择并加载音视频文件：win_audio_open() → 文件名（空=取消）
+  'win_audio_seek':     0x91, // 跳转：win_audio_seek(permille 0..1000)
+  'win_audio_state':    0x92, // 读取状态：win_audio_state() → "playing|pos|len|name"
+  'win_audio_band':     0x93, // 频谱分量：win_audio_band(i,n) → 0..100
+  'win_audio_beep':     0x94, // 提示音：win_audio_beep(freq,ms)
+  'win_textc':          0x96, // 居中文本：win_textc(cx, y, s)（按基线中点在 cx 居中）
   // 应用注册表 / 宿主桥接（DrapLang 枚举/启动应用、执行命令、绘制图标、移入废纸篓）
   'win_app_list':       0x80, // 枚举已注册应用：win_app_list() → 每行 "id|name|category"
   'win_app_launch':     0x81, // 启动应用：win_app_launch(id)
@@ -107,6 +124,10 @@ const BUILTINS = {
   cos:    { mod: 'math', id: 111, arity: 1 },
   log:    { mod: 'math', id: 112, arity: 1 },
   exp:    { mod: 'math', id: 113, arity: 1 },
+  // 浮点乘除（语言的 * / 是整数语义：MUL 用 imul、DIV 截断；矢量/动画需要真浮点）
+  fmul:   { mod: 'math', id: 114, arity: 2 },
+  fdiv:   { mod: 'math', id: 115, arity: 2 },
+  fmod:   { mod: 'math', id: 116, arity: 2 },
   // str（需 import str）
   toUpper:    { mod: 'str', id: 200, arity: 1 },
   toLower:    { mod: 'str', id: 201, arity: 1 },
@@ -143,6 +164,7 @@ const SYS_RET = {
   'time_now':   { kind: 'prim', name: 'i32' },
   'time_sleep': { kind: 'prim', name: 'i32' },
   'time_format':{ kind: 'prim', name: 'str' },
+  'time_parts': { kind: 'prim', name: 'str' },
   'term_clear': { kind: 'prim', name: 'i32' },
   'term_exit':  { kind: 'prim', name: 'i32' },
   'term_gui':   { kind: 'prim', name: 'i32' },
@@ -177,6 +199,21 @@ const SYS_RET = {
   'win_set_style':        { kind: 'prim', name: 'i32' },
   'win_glyph':            { kind: 'prim', name: 'i32' },
   'win_get_open_path':    { kind: 'prim', name: 'str' },
+  'win_line':             { kind: 'prim', name: 'i32' },
+  'win_circle':           { kind: 'prim', name: 'i32' },
+  'win_arc':              { kind: 'prim', name: 'i32' },
+  'win_rrect':            { kind: 'prim', name: 'i32' },
+  'win_alpha':            { kind: 'prim', name: 'i32' },
+  'win_set_line':         { kind: 'prim', name: 'i32' },
+  'win_tick':             { kind: 'prim', name: 'i32' },
+  'win_millis':           { kind: 'prim', name: 'i32' },
+  'win_audio':            { kind: 'prim', name: 'i32' },
+  'win_audio_open':       { kind: 'prim', name: 'str' },
+  'win_audio_seek':       { kind: 'prim', name: 'i32' },
+  'win_audio_state':      { kind: 'prim', name: 'str' },
+  'win_audio_band':       { kind: 'prim', name: 'i32' },
+  'win_audio_beep':       { kind: 'prim', name: 'i32' },
+  'win_textc':            { kind: 'prim', name: 'i32' },
   'args_count': { kind: 'prim', name: 'i32' },
   'args_get':    { kind: 'prim', name: 'str' },
 };
@@ -200,6 +237,7 @@ const SYS_ARGS = {
   'time_now':   0,
   'time_sleep': 1,
   'time_format':1,
+  'time_parts': 2,
   'term_clear': 0,
   'term_exit':  0,
   'term_gui':   0,
@@ -240,6 +278,21 @@ const SYS_ARGS = {
   'win_set_style':         3,
   'win_glyph':             4,
   'win_get_open_path':     0,
+  'win_line':              4,
+  'win_circle':            4,
+  'win_arc':               5,
+  'win_rrect':             5,
+  'win_alpha':             1,
+  'win_set_line':          1,
+  'win_tick':              1,
+  'win_millis':            0,
+  'win_audio':             1,
+  'win_audio_open':        0,
+  'win_audio_seek':        1,
+  'win_audio_state':       0,
+  'win_audio_band':        2,
+  'win_audio_beep':        2,
+  'win_textc':             3,
   'args_count': 0,
   'args_get':   1,
 };
@@ -425,7 +478,14 @@ export class DrapCC {
       if (/\d/.test(c)) {
         let j = i;
         while (j < n && /\d/.test(src[j])) j++;
-        push({ type: 'NUM', value: parseInt(src.slice(i, j), 10) });
+        // 浮点字面量：3.14 / 0.5（此前只能写整数，动画与图形计算被迫拆成 fdiv 常量）
+        let isFloat = false;
+        if (j < n && src[j] === '.' && j + 1 < n && /\d/.test(src[j + 1])) {
+          isFloat = true;
+          j++;
+          while (j < n && /\d/.test(src[j])) j++;
+        }
+        push({ type: 'NUM', value: isFloat ? parseFloat(src.slice(i, j)) : parseInt(src.slice(i, j), 10) });
         i = j; continue;
       }
       if (/[A-Za-z_]/.test(c)) {

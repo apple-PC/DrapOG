@@ -13,6 +13,7 @@ import { VM } from './drapog.vm.js';
 import { DrapSYS } from './drapog.sys.js';
 import { makeLineWriter } from './drapog.stream.js';
 import { drawGlyph, isGlyph } from './drapog.glyphs.js';
+import { createAudioEngine } from './drapog.audio.js';
 
 // 颜色数组 → CSS rgb 串
 function _rgb(c) {
@@ -32,8 +33,14 @@ export const drapAppBridge = {
     const st = sys.drapWins.get(win.id);
     if (!st) return;
     if (st.title) win.title = st.title;   // DrapLang 改了标题则同步
+    // 注意：帧驱动注入必须放在重放之后（注入 paint 会同步清空 drawOps，先注入会吃掉整帧）。
+    // 这里先取快照，保证本次重放用的是当前帧数据。
+    const ops = st.drawOps;
+    const controls = st.controls;
     // 1) drapp 自绘（背景 / 图形 / 文字）
-    for (const op of st.drawOps) {
+    for (const op of ops) {
+      const prevAlpha = ctx.globalAlpha;
+      if (typeof op.alpha === 'number') ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha / 100));
       if (op.op === 'text') {
         ctx.fillStyle = _rgb(op.color);
         const stylePrefix = (op.italic ? 'italic ' : '') + (op.bold ? '600 ' : '');
@@ -47,13 +54,50 @@ export const drapAppBridge = {
           const tw = ctx.measureText(op.text).width;
           ctx.fillRect(op.x, op.y + op.font + 1, tw, Math.max(1, op.font / 14));
         }
+      } else if (op.op === 'textc') {
+        ctx.fillStyle = _rgb(op.color);
+        const stylePrefix = (op.italic ? 'italic ' : '') + (op.bold ? '600 ' : '');
+        ctx.font = stylePrefix + op.font + 'px ' + (op.mono
+          ? 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+          : '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(op.text, op.x, op.y);
+        if (op.underline) {
+          const tw = ctx.measureText(op.text).width;
+          ctx.fillRect(op.x - tw / 2, op.y + op.font + 1, tw, Math.max(1, op.font / 14));
+        }
       } else if (op.op === 'fill') {
         ctx.fillStyle = _rgb(op.color);
         ctx.fillRect(op.x, op.y, op.w, op.h);
       } else if (op.op === 'stroke') {
         ctx.strokeStyle = _rgb(op.color);
-        ctx.lineWidth = 1;
+        ctx.lineWidth = op.lineW || 1;
         ctx.strokeRect(op.x, op.y, op.w, op.h);
+      } else if (op.op === 'rrect') {
+        ctx.fillStyle = _rgb(op.color);
+        wm.roundRect(op.x, op.y, op.w, op.h, op.rad);
+        ctx.fill();
+      } else if (op.op === 'line') {
+        ctx.strokeStyle = _rgb(op.color);
+        ctx.lineWidth = op.lineW || 1;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(op.x1, op.y1);
+        ctx.lineTo(op.x2, op.y2);
+        ctx.stroke();
+      } else if (op.op === 'circle') {
+        ctx.beginPath();
+        ctx.arc(op.cx, op.cy, op.r, 0, Math.PI * 2);
+        if (op.fill) { ctx.fillStyle = _rgb(op.color); ctx.fill(); }
+        else { ctx.strokeStyle = _rgb(op.color); ctx.lineWidth = op.lineW || 1; ctx.stroke(); }
+      } else if (op.op === 'arc') {
+        ctx.beginPath();
+        ctx.arc(op.cx, op.cy, op.r, op.a0 * Math.PI / 180, op.a1 * Math.PI / 180);
+        ctx.strokeStyle = _rgb(op.color);
+        ctx.lineWidth = op.lineW || 1;
+        ctx.lineCap = 'round';
+        ctx.stroke();
       } else if (op.op === 'icon') {
         // 应用手绘图标（macOS squircle）；无规格时 drawAppIcon 退回字母渲染
         if (wm && typeof wm.drawAppIcon === 'function') wm.drawAppIcon(op.id, op.x, op.y, op.size);
@@ -61,9 +105,10 @@ export const drapAppBridge = {
         // 手绘图标（文件/文件夹/动作等），颜色随当前绘制色（语义图标内部固定配色）
         drawGlyph(ctx, op.name, op.x, op.y, op.size, { color: _rgb(st.style.color) });
       }
+      if (typeof op.alpha === 'number') ctx.globalAlpha = prevAlpha;
     }
     // 2) 声明式控件（标准样式，宿主自动绘制）
-    for (const c of st.controls) {
+    for (const c of controls) {
       if (c.type === 'button') {
         if (isGlyph(c.id)) {
           // 手绘图标按钮：macOS 风格图标型（无蓝底），颜色取主题前景色
@@ -100,6 +145,15 @@ export const drapAppBridge = {
           ctx.fillStyle = '#fff';
           ctx.fillRect(c.x + 6 + tw, c.y + 4, 1.5, c.h - 8);
         }
+      }
+    }
+    // 3) 帧驱动：drapp 调过 win_tick(ms) 则按间隔排下一帧（放在最后，避免清空本帧数据）
+    if (st.tickMs > 0) {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (!st.tickBusy && now - (st.lastTick || 0) >= st.tickMs) {
+        st.lastTick = now;
+        st.tickBusy = true;
+        sys.injectWinEvent(win.id, 'paint');
       }
     }
   },
@@ -162,9 +216,11 @@ export const drapAppBridge = {
 export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath = null, appId = '__drapapp__') {
   const vm = new VM();
   vm.load(program);
+  const audio = createAudioEngine();     // 每个 GUI 应用一份音频引擎（媒体类应用用，其余零开销）
   const sys = new DrapSYS({
     vm,
     vfs,
+    audio,
     out: () => {},
     onWinCreate: ({ title, w, h }) => {
       const win = wm.createWindow({ title, w, h, appId });
@@ -173,7 +229,7 @@ export function launchDrapAppProgram(wm, vfs, program, registry = null, openPath
       if (st) st.__openPath = openPath || '';
       return win.id;
     },
-    onWinClose: (winId) => { wm.closeWindow(winId); },
+    onWinClose: (winId) => { try { audio.dispose(); } catch (e) {} wm.closeWindow(winId); },
       getTheme: () => (wm && wm.T && wm.T.palette) ? wm.T.palette : null,
       onSetTheme: (name) => { if (wm && typeof wm.setTheme === 'function') wm.setTheme(name); if (wm && typeof wm.savePrefs === 'function') wm.savePrefs(); },
       onOpenFinder: (path) => { if (wm && typeof wm.openFinderAt === 'function') wm.openFinderAt(path); },

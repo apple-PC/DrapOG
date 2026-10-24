@@ -14,7 +14,7 @@ export class DrapSYS {
    * @param {Object} opts.vfs                      虚拟文件系统
    * @param {Function} opts.out                    输出回调
    */
-  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard, registry, wm, shell, openPath }) {
+  constructor({ vm, vfs, out, onRead, onWinCreate, onWinClose, onCwd, onExit, onClear, onSwitchGUI, hostExec, getTheme, onSetTheme, onOpenFinder, onSetSoftKeyboard, onGetThemeName, onGetSoftKeyboard, registry, wm, shell, openPath, audio }) {
     this.vm = vm;
     this.vfs = vfs;
     this.out = out || (() => {});
@@ -40,6 +40,7 @@ export class DrapSYS {
     // 应用注册表 / 窗口管理器（DrapLang 经此枚举并启动应用、绘制应用图标）
     this.registry = registry || null;     // AppRegistry 实例（app_list / app_launch 用）
     this.wm = wm || null;                 // WindowManager 实例（app_icon 用）
+    this.audio = audio || null;           // 宿主音频引擎（媒体类应用：播放/频谱/提示音）
     this.shell = shell || null;           // 预留：宿主 shell 实例
     this._appShell = null;                // win_shell_exec 懒创建的 DrapShell
     this._shellBuf = [];                  // 宿主命令捕获输出缓冲
@@ -68,6 +69,7 @@ export class DrapSYS {
       0x50: this.time_now.bind(this),
       0x54: this.time_sleep.bind(this),
       0x55: this.time_format.bind(this),
+      0x95: this.time_parts.bind(this),
       0x17: this.fs_realpath.bind(this),
       0x32: this.term_clear.bind(this),
       0x33: this.term_exit.bind(this),
@@ -111,6 +113,22 @@ export class DrapSYS {
       0x84: this.win_glyph.bind(this),            // 绘制手绘图标（name, x, y, size）
       0x85: this.win_trash.bind(this),            // 把路径移入废纸篓（path）
       0x86: this.win_get_open_path.bind(this),     // 读取本窗口透传的初始打开路径（openFinderAt 用）
+      // 矢量绘图 / 帧驱动 / 音频（媒体类 DrapLang 应用）
+      0x87: this.win_line.bind(this),              // 直线
+      0x88: this.win_circle.bind(this),            // 圆（填充/描边）
+      0x89: this.win_arc.bind(this),               // 圆弧（角度制）
+      0x8a: this.win_rrect.bind(this),             // 圆角矩形（填充）
+      0x8b: this.win_alpha.bind(this),             // 透明度
+      0x8c: this.win_set_line.bind(this),          // 线宽
+      0x8d: this.win_tick.bind(this),              // 逐帧重绘间隔
+      0x8e: this.win_millis.bind(this),            // 毫秒时间戳
+      0x8f: this.win_audio.bind(this),             // 音频播放控制
+      0x90: this.win_audio_open.bind(this),        // 选择并加载音视频文件
+      0x91: this.win_audio_seek.bind(this),        // 音频跳转
+      0x92: this.win_audio_state.bind(this),       // 音频状态
+      0x93: this.win_audio_band.bind(this),        // 频谱分量
+      0x94: this.win_audio_beep.bind(this),        // 提示音
+      0x96: this.win_textc.bind(this),             // 居中文本
       0x60: this.args_count.bind(this),
       0x61: this.args_get.bind(this),
     };
@@ -298,8 +316,24 @@ export class DrapSYS {
     return this.vm.pushStr(out);
   }
 
-  /* ---------- 进程参数（CLI 工具读取命令行） ---------- */
-  args_count() {
+  // 时间分量：time_parts(ts, utc) → "Y|M|D|h|m|s|wday"（utc 非 0 用 UTC 分量）
+  // DrapLang 侧无日期 API，世界时钟 / 数字表盘经此拆分，避免字符串解析。
+  time_parts(ts, utc) {
+    let sec = Math.trunc(ts);
+    if (!sec) sec = Math.floor(Date.now() / 1000);
+    const d = new Date(sec * 1000);
+    const u = (utc != 0);
+    const Y = u ? d.getUTCFullYear() : d.getFullYear();
+    const M = (u ? d.getUTCMonth() : d.getMonth()) + 1;
+    const D = u ? d.getUTCDate() : d.getDate();
+    const h = u ? d.getUTCHours() : d.getHours();
+    const m = u ? d.getUTCMinutes() : d.getMinutes();
+    const s = u ? d.getUTCSeconds() : d.getSeconds();
+    const wd = u ? d.getUTCDay() : d.getDay();
+    return this.vm.pushStr(Y + '|' + M + '|' + D + '|' + h + '|' + m + '|' + s + '|' + wd);
+  }
+
+  /* ---------- 进程参数（CLI 工具读取命令行） ---------- */  args_count() {
     return this.argv.length;
   }
 
@@ -333,9 +367,12 @@ export class DrapSYS {
       drawOps: [],
       controls: [],        // 声明式控件：每帧 paint 时重置，由 drapp 填充
       inputs: new Map(),   // 输入框持久值：id -> string（跨帧保留用户输入）
-      style: { color: [255, 255, 255], font: 14, mono: false, bold: false, italic: false, underline: false },
+      style: { color: [255, 255, 255], font: 14, mono: false, bold: false, italic: false, underline: false, alpha: 100, lineW: 1 },
       title, w, h,
       dirty: true,
+      tickMs: 0,       // win_tick(ms)：>0 时宿主按该间隔注入 paint（逐帧动画）
+      lastTick: 0,
+      tickBusy: false,
     });
     this.curWinId = id;
     const st0 = this.drapWins.get(id);
@@ -366,21 +403,28 @@ export class DrapSYS {
   win_text(x, y, strPtr) {
     const st = this._cur();
     if (!st) return 0;
-    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono, bold: !!st.style.bold, italic: !!st.style.italic, underline: !!st.style.underline });
+    st.drawOps.push({ op: 'text', x, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono, bold: !!st.style.bold, italic: !!st.style.italic, underline: !!st.style.underline, alpha: st.style.alpha });
+    return 0;
+  }
+
+  // 居中文本：以 cx 为水平中心绘制（宿主用 measureText 精确居中；中文/数字混排不再靠字宽估算）
+  win_textc(cx, y, strPtr) {
+    const st = this._cur(); if (!st) return 0;
+    st.drawOps.push({ op: 'textc', x: cx, y, text: this.vm.readStr(strPtr), color: st.style.color.slice(), font: st.style.font, mono: !!st.style.mono, bold: !!st.style.bold, italic: !!st.style.italic, underline: !!st.style.underline, alpha: st.style.alpha });
     return 0;
   }
 
   win_fill_rect(x, y, w, h) {
     const st = this._cur();
     if (!st) return 0;
-    st.drawOps.push({ op: 'fill', x, y, w, h, color: st.style.color.slice() });
+    st.drawOps.push({ op: 'fill', x, y, w, h, color: st.style.color.slice(), alpha: st.style.alpha });
     return 0;
   }
 
   win_stroke_rect(x, y, w, h) {
     const st = this._cur();
     if (!st) return 0;
-    st.drawOps.push({ op: 'stroke', x, y, w, h, color: st.style.color.slice() });
+    st.drawOps.push({ op: 'stroke', x, y, w, h, color: st.style.color.slice(), lineW: st.style.lineW, alpha: st.style.alpha });
     return 0;
   }
 
@@ -535,9 +579,130 @@ export class DrapSYS {
     return 1;
   }
 
+  /* ---------- 矢量绘图（直线 / 圆 / 弧 / 圆角矩形） ----------
+     与 fill / stroke / text 一致，指令入队到 drawOps，由宿主桥接按 z 序重放。
+     这样 DrapLang 应用不需要原生 canvas 能力，也能画出波形 / 圆环 / 粒子等媒体图形。
+  ------------------------------------------------------------ */
+
+  win_line(x1, y1, x2, y2) {
+    const st = this._cur(); if (!st) return 0;
+    st.drawOps.push({ op: 'line', x1, y1, x2, y2, color: st.style.color.slice(), lineW: st.style.lineW, alpha: st.style.alpha });
+    return 0;
+  }
+
+  // mode：0=填充，非 0=描边
+  win_circle(cx, cy, r, mode) {
+    const st = this._cur(); if (!st) return 0;
+    if (r <= 0) return 0;
+    st.drawOps.push({ op: 'circle', cx, cy, r, fill: (mode == 0), color: st.style.color.slice(), lineW: st.style.lineW, alpha: st.style.alpha });
+    return 0;
+  }
+
+  // 圆弧（描边），角度制：0=右侧，顺时针（屏幕坐标 y 向下）
+  win_arc(cx, cy, r, a0, a1) {
+    const st = this._cur(); if (!st) return 0;
+    if (r <= 0) return 0;
+    st.drawOps.push({ op: 'arc', cx, cy, r, a0, a1, color: st.style.color.slice(), lineW: st.style.lineW, alpha: st.style.alpha });
+    return 0;
+  }
+
+  win_rrect(x, y, w, h, rad) {
+    const st = this._cur(); if (!st) return 0;
+    st.drawOps.push({ op: 'rrect', x, y, w, h, rad, color: st.style.color.slice(), alpha: st.style.alpha });
+    return 0;
+  }
+
+  // 透明度（0..100），影响之后入队的绘制指令
+  win_alpha(a) {
+    const st = this._cur(); if (!st) return 0;
+    let v = Math.trunc(a);
+    if (v < 0) v = 0; if (v > 100) v = 100;
+    st.style.alpha = v;
+    return 0;
+  }
+
+  // 线宽（>=1）
+  win_set_line(w) {
+    const st = this._cur(); if (!st) return 0;
+    let v = Math.trunc(w);
+    if (v < 1) v = 1;
+    st.style.lineW = v;
+    return 0;
+  }
+
+  /* ---------- 帧驱动 ----------
+     DrapLang 侧没有定时器，win_tick(ms) 让宿主桥接按间隔注入 paint 事件，
+     on_paint 每帧重新计算状态并重绘（宿主每帧重放 drawOps），即可做动画。
+  ------------------------------------------------------------ */
+  win_tick(ms) {
+    const st = this._cur(); if (!st) return 0;
+    let v = Math.trunc(ms);
+    if (v < 0) v = 0;
+    st.tickMs = v;
+    st.lastTick = 0;
+    st.tickBusy = false;
+    return 0;
+  }
+
+  // 毫秒时间戳（帧内计时 / 秒表 / 动画相位）
+  win_millis() {
+    return Date.now();
+  }
+
+  /* ---------- 音频（宿主音频引擎，浏览器环境可用；无引擎时全部安全退化） ---------- */
+  // cmd：0=播放 1=暂停 2=停止 3=麦克风开 4=麦克风关 5=系统音频开
+  win_audio(cmd) {
+    const a = this.audio;
+    if (!a) return 0;
+    try {
+      switch (Math.trunc(cmd)) {
+        case 0: a.play(); return 1;
+        case 1: a.pause(); return 1;
+        case 2: a.stop(); return 1;
+        case 3: a.micOn(); return 1;
+        case 4: a.micOff(); return 1;
+        case 5: a.systemOn(); return 1;
+        default: return 0;
+      }
+    } catch (e) { return 0; }
+  }
+
+  // 弹出宿主文件选择框，加载音视频文件；返回文件名（取消返回空串）
+  async win_audio_open() {
+    const a = this.audio;
+    if (!a || typeof a.open !== 'function') return this.vm.pushStr('');
+    try {
+      const name = await a.open();
+      return this.vm.pushStr(name || '');
+    } catch (e) { return this.vm.pushStr(''); }
+  }
+
+  // 跳转：permille 0..1000（千分比，DrapLang 侧无小数也不失精度）
+  win_audio_seek(permille) {
+    if (!this.audio || typeof this.audio.seek !== 'function') return 0;
+    try { this.audio.seek(permille); return 1; } catch (e) { return 0; }
+  }
+
+  // 状态："playing|posMs|lenMs|name"（无音频时 "0|0|0|"）
+  win_audio_state() {
+    if (!this.audio || typeof this.audio.state !== 'function') return this.vm.pushStr('0|0|0|');
+    try { return this.vm.pushStr(this.audio.state()); } catch (e) { return this.vm.pushStr('0|0|0|'); }
+  }
+
+  // 频谱第 i 个分量（共 n 个），返回 0..100
+  win_audio_band(i, n) {
+    if (!this.audio || typeof this.audio.band !== 'function') return 0;
+    try { return this.audio.band(i, n); } catch (e) { return 0; }
+  }
+
+  // 提示音（计时结束 / 节拍）：频率 Hz + 时长 ms
+  win_audio_beep(freq, ms) {
+    if (!this.audio || typeof this.audio.beep !== 'function') return 0;
+    try { this.audio.beep(freq, ms); return 1; } catch (e) { return 0; }
+  }
+
   // 把路径移入废纸篓（经 VFS 共享底层工具）；成功返回 1，否则 0
-  async win_trash(pathPtr) {
-    const path = this.vm.readStr(pathPtr);
+  async win_trash(pathPtr) {    const path = this.vm.readStr(pathPtr);
     try { return (await moveToTrash(this.vfs, path)) ? 1 : 0; }
     catch (e) { return 0; }
   }
@@ -546,6 +711,8 @@ export class DrapSYS {
   win_get_event() {
     const st = this._cur();
     if (!st) return this.vm.pushStr('');
+    // 本轮事件已被取走：解除 tick 占用标记，宿主可安排下一帧（避免 tick 堆积）
+    st.tickBusy = false;
     if (st.queue.length > 0) {
       const ev = st.queue.shift();
       if (ev === 'paint') { st.drawOps = []; st.controls = []; }

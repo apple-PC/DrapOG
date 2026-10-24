@@ -103,6 +103,13 @@ export async function startGUI(opts = {}) {
     registry.addDrap('thispc',   { name: '此电脑',       icon: 'P',  type: 'gui',
       file: '../Apps/ThisPC.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '此电脑（卷与目录 / 打开 Finder）', category: 'system' });
+    // 媒体 / 时间工具（新增内置应用：矢量绘图 + 帧驱动 + 宿主音频引擎）
+    registry.addDrap('soundwave', { name: '音波',        type: 'gui',
+      file: '../Apps/SoundWave.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '音频频谱可视化（频谱柱 / 环形波 / 波形线 / 粒子）', category: 'media' });
+    registry.addDrap('chrono',    { name: '计时器',      type: 'gui',
+      file: '../Apps/Chrono.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '世界时间 / 时钟 / 秒表 / 计时器', category: 'utilities' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现，含各包 icon.json 手绘图标）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 

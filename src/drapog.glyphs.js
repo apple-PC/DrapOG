@@ -189,6 +189,94 @@ const GLYPHS = {
   alignRight(ctx, color) {
     stroke(ctx, color, 1.8, c => { c.moveTo(4, 6); c.lineTo(20, 6); c.moveTo(10, 12); c.lineTo(20, 12); c.moveTo(7, 18); c.lineTo(20, 18); });
   },
+
+  // ---------- 播放 / 音频（音波） ----------
+  play(ctx, color) {
+    fill(ctx, color, c => { c.moveTo(7, 4.5); c.lineTo(19, 12); c.lineTo(7, 19.5); c.closePath(); });
+  },
+  pause(ctx, color) {
+    ctx.fillStyle = color;
+    rr(ctx, 6.5, 4.5, 4, 15, 1.4); ctx.fill();
+    rr(ctx, 13.5, 4.5, 4, 15, 1.4); ctx.fill();
+  },
+  stop(ctx, color) {
+    ctx.fillStyle = color;
+    rr(ctx, 6, 6, 12, 12, 2); ctx.fill();
+  },
+  volume(ctx, color) {
+    fill(ctx, color, c => { c.moveTo(3, 9); c.lineTo(7, 9); c.lineTo(12, 4.5); c.lineTo(12, 19.5); c.lineTo(7, 15); c.lineTo(3, 15); c.closePath(); });
+    stroke(ctx, color, 1.7, c => { c.moveTo(15, 9); c.quadraticCurveTo(17.5, 12, 15, 15); });
+    stroke(ctx, color, 1.7, c => { c.moveTo(18, 6.5); c.quadraticCurveTo(21.5, 12, 18, 17.5); });
+  },
+  mic(ctx, color) {
+    stroke(ctx, color, 1.9, c => { rr(c, 9, 3, 6, 11, 3); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(5.5, 11.5); c.quadraticCurveTo(5.5, 17, 12, 17); c.quadraticCurveTo(18.5, 17, 18.5, 11.5); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(12, 17); c.lineTo(12, 21); c.moveTo(8.5, 21); c.lineTo(15.5, 21); });
+  },
+  bars(ctx, color) {
+    ctx.fillStyle = color;
+    const hs = [8, 15, 11, 18, 13];
+    for (let i = 0; i < 5; i++) { rr(ctx, 3 + i * 4, 20 - hs[i], 2.6, hs[i], 1.2); ctx.fill(); }
+  },
+  ring(ctx, color) {
+    stroke(ctx, color, 1.8, c => { c.arc(12, 12, 8.5, 0, Math.PI * 2); });
+    stroke(ctx, color, 1.8, c => { c.arc(12, 12, 4, 0, Math.PI * 2); });
+    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(12, 12, 1.8, 0, Math.PI * 2); ctx.fill();
+  },
+  wave(ctx, color) {
+    stroke(ctx, color, 1.9, c => {
+      c.moveTo(2.5, 12);
+      for (let x = 2.5; x <= 21.5; x += 0.5) c.lineTo(x, 12 - Math.sin((x - 2.5) / 19 * Math.PI * 4) * 6);
+    });
+  },
+  particles(ctx, color) {
+    ctx.fillStyle = color;
+    const pts = [[7, 8, 2], [15, 6, 1.4], [18, 12, 2.2], [11, 13, 1.6], [6, 16, 1.3], [16, 18, 1.8], [9, 19, 1.2]];
+    for (const [x, y, r] of pts) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+  },
+
+  // ---------- 时间（计时器） ----------
+  clock(ctx, color) {
+    stroke(ctx, color, 1.9, c => { c.arc(12, 12, 8.6, 0, Math.PI * 2); });
+    stroke(ctx, color, 2, c => { c.moveTo(12, 7); c.lineTo(12, 12.4); c.lineTo(16, 14.2); });
+  },
+  stopwatch(ctx, color) {
+    stroke(ctx, color, 1.9, c => { c.arc(12, 13.5, 7.5, 0, Math.PI * 2); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(12, 13.5); c.lineTo(12, 9.5); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(9.5, 2.5); c.lineTo(14.5, 2.5); c.moveTo(12, 2.5); c.lineTo(12, 4); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(18.5, 6.5); c.lineTo(20, 8); });
+  },
+  globe(ctx, color) {
+    stroke(ctx, color, 1.8, c => { c.arc(12, 12, 8.6, 0, Math.PI * 2); });
+    stroke(ctx, color, 1.5, c => { c.moveTo(3.4, 12); c.lineTo(20.6, 12); });
+    stroke(ctx, color, 1.5, c => {
+      c.moveTo(12, 3.4);
+      c.bezierCurveTo(7, 7, 7, 17, 12, 20.6);
+      c.bezierCurveTo(17, 17, 17, 7, 12, 3.4);
+    });
+  },
+  plus(ctx, color) {
+    stroke(ctx, color, 2.2, c => { c.moveTo(12, 5); c.lineTo(12, 19); c.moveTo(5, 12); c.lineTo(19, 12); });
+  },
+  minus(ctx, color) {
+    stroke(ctx, color, 2.2, c => { c.moveTo(5, 12); c.lineTo(19, 12); });
+  },
+  reset(ctx, color) {
+    stroke(ctx, color, 1.9, c => { c.arc(12, 12, 7.2, Math.PI * 0.4, Math.PI * 1.95); });
+    stroke(ctx, color, 1.9, c => { c.moveTo(6.4, 8.2); c.lineTo(4.3, 13.2); c.lineTo(9.8, 12.3); });
+  },
+  timer(ctx, color) {
+    // 沙漏
+    stroke(ctx, color, 1.9, c => {
+      c.moveTo(6, 3); c.lineTo(18, 3);
+      c.moveTo(6, 21); c.lineTo(18, 21);
+      c.moveTo(7, 3); c.lineTo(7, 7); c.lineTo(12, 12); c.lineTo(7, 17); c.lineTo(7, 21);
+      c.moveTo(17, 3); c.lineTo(17, 7); c.lineTo(12, 12); c.lineTo(17, 17); c.lineTo(17, 21);
+    });
+  },
+  lap(ctx, color) {    stroke(ctx, color, 1.8, c => { c.moveTo(4, 6); c.lineTo(16, 6); c.moveTo(4, 11); c.lineTo(16, 11); c.moveTo(4, 16); c.lineTo(16, 16); });
+    stroke(ctx, color, 1.8, c => { c.moveTo(19, 4); c.lineTo(19, 18); });
+  },
 };
 
 export function isGlyph(name) { return Object.prototype.hasOwnProperty.call(GLYPHS, name); }

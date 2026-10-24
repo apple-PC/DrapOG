@@ -1,0 +1,475 @@
+// 计时器 Chrono —— 世界时间 / 时钟 / 秒表 / 计时器（DrapLang 原生重写版）
+// 原实现为独立网页（SVG + canvas 世界地图 + Web Audio 提示音）；此处改为 DrapLang 应用：
+//   · 时间分量来自 time_parts（本地/UTC 双通道），毫秒精度用 win_millis
+//   · 圆环与指针用新增矢量原语（win_arc / win_circle / win_line）
+//   · 提示音走宿主音频引擎 win_audio_beep；逐帧刷新靠 win_tick
+//   · 配色全部取系统主题（win_theme），深浅主题自动适配
+import math
+import str
+
+entry fn main() -> i32 {
+    let win = syscall win_create("计时器", 420, 620)
+
+    let W = 420
+    let H = 620
+    let HEAD = 68
+
+    let view = 1          // 0 世界时间 1 时钟 2 秒表 3 计时器
+    let i = 0
+    let j = 0
+    let x = 0
+    let y = 0
+    let w = 0
+    let h = 0
+    let c = ""
+    let d = ""
+    let id = ""
+    let parts = [""]
+    let tp = [""]
+    let nowS = 0
+    let nowMs = 0
+    let year = 0
+    let mon = 0
+    let day = 0
+    let hh = 0
+    let mi = 0
+    let ss = 0
+    let wd = 0
+
+    // 秒表
+    let swRun = 0
+    let swAcc = 0        // 已累计毫秒
+    let swStart = 0      // 本次起跑时刻
+    let swMs = 0
+    let swM = 0
+    let swS = 0
+    let swC = 0
+    let laps = []
+
+    // 计时器
+    let tRun = 0
+    let tTotal = 300     // 秒
+    let tEnd = 0         // 结束时刻（ms）
+    let tLeft = 0        // 剩余毫秒
+    let tDone = 0
+    let lastBeep = 0
+    let blink = 0
+
+    // 自绘按钮（预设 chip / 城市行）的命中区
+    let chipX = []
+    let chipY = []
+    let chipW = []
+    let chipH = []
+    let chipId = []
+    let chipN = 0
+    let found = -1
+
+    let cx = 0
+    let cy = 0
+    let rad = 0
+    let frac = 0.0
+    let ang = 0.0
+    let tw = 0
+    let label = ""
+    let viewIds = ["globe", "clock", "stopwatch", "timer"]
+    let viewNames = ["世界时间", "时间", "秒表", "计时器"]
+    let wdNames = ["日", "一", "二", "三", "四", "五", "六"]
+
+    // 预设时长（秒）与标签
+    let presetSec = [60, 180, 300, 600, 1500]
+    let presetLbl = ["1 分", "3 分", "5 分", "10 分", "25 分"]
+
+    // 世界时间城市（名称 / UTC 偏移小时）
+    let cityName = ["北京", "东京", "悉尼", "迪拜", "巴黎", "伦敦", "纽约", "洛杉矶"]
+    let cityOff = [8, 9, 10, 4, 2, 1, -4, -7]
+
+    let bigFont = 64
+    let stageTop = 0
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    nowMs = syscall win_millis()
+    nowS = syscall time_now()
+
+    // —— 秒表 / 计时器到点判定（先算，后面显示用）——
+    if (swRun == 1) { swMs = swAcc + (nowMs - swStart) } else { swMs = swAcc }
+    if (tRun == 1) {
+        tLeft = tEnd - nowMs
+        if (tLeft <= 0) {
+            tLeft = 0
+            tRun = 0
+            tDone = 1
+            syscall win_audio_beep(880, 420)
+            syscall win_audio_beep(1320, 260)
+        }
+    }
+    if (tDone == 1) {
+        if (nowMs - lastBeep > 1400) {
+            lastBeep = nowMs
+            blink = 1 - blink
+            syscall win_audio_beep(932, 180)
+        }
+    }
+
+    // —— 背景 ——
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+
+    // —— 顶部视图切换 ——
+    syscall win_theme(3)
+    syscall win_fill_rect(0, 0, W, HEAD)
+    syscall win_theme(4)
+    syscall win_fill_rect(0, HEAD - 1, W, 1)
+    i = 0
+    while (i < 4) {
+        x = fdiv(W, 2) - 112 + i * 56
+        if (i == view) {
+            syscall win_theme(4)
+            syscall win_rrect(x - 2, 6, 40, 40, 9)
+        }
+        syscall win_button(viewIds[i], x, 8, 36, 36)
+        syscall win_set_font(10)
+        if (i == view) { syscall win_theme(2) } else { syscall win_theme(1) }
+        syscall win_textc(x + 18, 48, viewNames[i])
+        i = i + 1
+    }
+    stageTop = HEAD
+
+    chipX = []
+    chipY = []
+    chipW = []
+    chipH = []
+    chipId = []
+    chipN = 0
+
+    if (view == 0) {
+        // ================= 世界时间 =================
+        tp = split(syscall time_parts(nowS, 0), "|")
+        syscall win_theme(1)
+        syscall win_set_style(1, 0, 0)
+        syscall win_set_font(30)
+        if (atoi(tp[3]) < 10) { c = "0" + tp[3] + ":" } else { c = tp[3] + ":" }
+        if (atoi(tp[4]) < 10) { c = c + "0" }
+        c = c + tp[4]
+        syscall win_textc(fdiv(W, 2), 88, c)
+        syscall win_set_style(0, 0, 0)
+        syscall win_set_font(12)
+        syscall win_theme(1)
+        syscall win_textc(fdiv(W, 2), 128, "本地时间 · " + tp[0] + "/" + tp[1] + "/" + tp[2])
+
+        i = 0
+        while (i < 8) {
+            y = 168 + i * 52
+            syscall win_theme(4)
+            syscall win_rrect(24, y, W - 48, 44, 10)
+            // 该城市的当地时间：把「当前 UTC 秒 + 偏移」按 UTC 分量格式化
+            tp = split(syscall time_parts(nowS + cityOff[i] * 3600, 1), "|")
+            syscall win_theme(1)
+            syscall win_set_font(14)
+            syscall win_set_style(1, 0, 0)
+            syscall win_text(40, y + 8, cityName[i])
+            syscall win_set_style(0, 0, 0)
+            syscall win_set_font(10)
+            if (cityOff[i] >= 0) { d = "UTC+" + itoa(cityOff[i]) } else { d = "UTC" + itoa(cityOff[i]) }
+            syscall win_text(40, y + 26, d)
+
+            if (atoi(tp[3]) < 10) { c = "0" + tp[3] + ":" } else { c = tp[3] + ":" }
+            if (atoi(tp[4]) < 10) { c = c + "0" }
+            c = c + tp[4]
+            // 判断昼 / 夜（6:00–18:00 为白天）
+            syscall win_set_font(22)
+            syscall win_set_style(1, 0, 0)
+            if (atoi(tp[3]) >= 6 && atoi(tp[3]) < 18) { syscall win_set_color(255, 196, 84) }
+            else { syscall win_set_color(120, 170, 255) }
+            syscall win_textc(W - 74, y + 10, c)
+            syscall win_set_style(0, 0, 0)
+            i = i + 1
+        }
+    } else if (view == 1) {
+        // ================= 时钟 =================
+        tp = split(syscall time_parts(nowS, 0), "|")
+        year = atoi(tp[0]); mon = atoi(tp[1]); day = atoi(tp[2])
+        hh = atoi(tp[3]); mi = atoi(tp[4]); ss = atoi(tp[5]); wd = atoi(tp[6])
+
+        if (hh < 10) { c = "0" + itoa(hh) + ":" } else { c = itoa(hh) + ":" }
+        if (mi < 10) { c = c + "0" }
+        c = c + itoa(mi) + ":"
+        if (ss < 10) { c = c + "0" }
+        c = c + itoa(ss)
+        syscall win_theme(1)
+        syscall win_mono(1)
+        syscall win_set_style(1, 0, 0)
+        syscall win_set_font(52)
+        tw = len(c) * 32
+        syscall win_textc(fdiv(W, 2), 200, c)
+        syscall win_mono(0)
+        syscall win_set_style(0, 0, 0)
+
+        // 模拟钟面
+        cx = fdiv(W, 2)
+        cy = 380
+        rad = 84
+        syscall win_theme(4)
+        syscall win_circle(cx, cy, rad, 0)
+        syscall win_theme(1)
+        syscall win_set_line(2)
+        syscall win_alpha(30)
+        syscall win_circle(cx, cy, rad, 1)
+        syscall win_alpha(100)
+
+        // 12 个刻度
+        i = 0
+        syscall win_theme(1)
+        while (i < 12) {
+            ang = fmul(fdiv(i, 12), 6.28318) - 1.5708
+            syscall win_set_line(2)
+            syscall win_alpha(70)
+            syscall win_line(round(cx + fmul(cos(ang), rad - 10)), round(cy + fmul(sin(ang), rad - 10)),
+                            round(cx + fmul(cos(ang), rad - 3)), round(cy + fmul(sin(ang), rad - 3)))
+            i = i + 1
+        }
+        syscall win_alpha(100)
+        // 时针 / 分针 / 秒针
+        ang = fmul(fdiv(hh % 12, 12), 6.28318) + fmul(fdiv(mi, 720), 6.28318) - 1.5708
+        syscall win_set_line(5)
+        syscall win_line(cx, cy, round(cx + fmul(cos(ang), fmul(rad, 0.5))), round(cy + fmul(sin(ang), fmul(rad, 0.5))))
+        ang = fmul(fdiv(mi, 60), 6.28318) + fmul(fdiv(ss, 3600), 6.28318) - 1.5708
+        syscall win_set_line(3)
+        syscall win_line(cx, cy, round(cx + fmul(cos(ang), fmul(rad, 0.78))), round(cy + fmul(sin(ang), fmul(rad, 0.78))))
+        syscall win_theme(2)
+        ang = fmul(fdiv(ss, 60), 6.28318) - 1.5708
+        syscall win_set_line(2)
+        syscall win_line(cx, cy, round(cx + fmul(cos(ang), fmul(rad, 0.88))), round(cy + fmul(sin(ang), fmul(rad, 0.88))))
+        syscall win_circle(cx, cy, 4, 0)
+
+        syscall win_theme(1)
+        syscall win_set_font(13)
+        d = itoa(year) + " 年 " + itoa(mon) + " 月 " + itoa(day) + " 日 · 星期" + wdNames[wd]
+        syscall win_textc(fdiv(W, 2), 500, d)
+    } else if (view == 2) {
+        // ================= 秒表 =================
+        swM = fdiv(swMs, 60000)
+        swS = fdiv(swMs - swM * 60000, 1000)
+        swC = fdiv(swMs - swM * 60000 - swS * 1000, 10)
+        c = itoa(swM) + ":"
+        if (swS < 10) { c = c + "0" }
+        c = c + itoa(swS) + "."
+        if (swC < 10) { c = c + "0" }
+        c = c + itoa(swC)
+        syscall win_theme(1)
+        syscall win_mono(1)
+        syscall win_set_style(1, 0, 0)
+        syscall win_set_font(54)
+        tw = len(c) * 34
+        syscall win_textc(fdiv(W, 2), 120, c)
+        syscall win_mono(0)
+        syscall win_set_style(0, 0, 0)
+
+        // 操作按钮：开始/暂停 · 计次 · 复位
+        x = fdiv(W, 2) - 96
+        if (swRun == 1) { syscall win_button("pause", x, 230, 56, 56) }
+        else { syscall win_button("play", x, 230, 56, 56) }
+        syscall win_set_font(10)
+        syscall win_theme(1)
+        if (swRun == 1) { label = "暂停" } else { label = "开始" }
+        syscall win_textc(x + 28, 292, label)
+
+        syscall win_button("lap", x + 68, 230, 56, 56)
+        syscall win_theme(1)
+        syscall win_textc(x + 96, 292, "计次")
+
+        syscall win_button("reset", x + 136, 230, 56, 56)
+        syscall win_theme(1)
+        syscall win_textc(x + 164, 292, "复位")
+
+        // 计次列表（最近 6 条）
+        syscall win_theme(4)
+        syscall win_rrect(24, 330, W - 48, 236, 12)
+        syscall win_theme(1)
+        syscall win_set_font(11)
+        syscall win_text(40, 342, "计次")
+        j = len(laps) - 1
+        i = 0
+        while (i < 6) {
+            if (j >= 0) {
+                y = 368 + i * 30
+                d = "#" + itoa(j + 1)
+                syscall win_set_color(140, 150, 170)
+                syscall win_text(40, y, d)
+                syscall win_theme(1)
+                syscall win_set_font(14)
+                syscall win_text(W - 60 - len(laps[j]) * 8, y, laps[j])
+                syscall win_set_font(11)
+            }
+            j = j - 1
+            i = i + 1
+        }
+    } else {
+        // ================= 计时器 =================
+        tLeft = 0
+        if (tRun == 1) { tLeft = tEnd - nowMs } else if (tDone == 1) { tLeft = 0 } else { tLeft = tTotal * 1000 }
+        if (tLeft < 0) { tLeft = 0 }
+        swS = fdiv(tLeft, 1000)
+        swM = fdiv(swS, 60)
+        swS = swS - swM * 60
+        c = itoa(swM) + ":"
+        if (swS < 10) { c = c + "0" }
+        c = c + itoa(swS)
+
+        cx = fdiv(W, 2)
+        cy = 250
+        rad = 104
+        // 轨道 + 进度弧
+        syscall win_theme(4)
+        syscall win_set_line(12)
+        syscall win_circle(cx, cy, rad, 1)
+        frac = 1.0
+        if (tTotal > 0) { frac = fdiv(tLeft, tTotal * 1000) }
+        if (frac < 0) { frac = 0.0 }
+        if (frac > 1.0) { frac = 1.0 }
+        syscall win_theme(2)
+        if (tDone == 0) {
+            // 359.9 收尾：满进度时也画成「几乎整圈」，避免 0/360 同点在某些实现下不落笔
+            syscall win_arc(cx, cy, rad, -90, -90 + round(fmul(frac, 359.9)))
+        } else {
+            if (blink == 1) { syscall win_set_color(255, 69, 58) }
+            syscall win_arc(cx, cy, rad, -90, 270)
+        }
+
+        syscall win_theme(1)
+        syscall win_mono(1)
+        syscall win_set_style(1, 0, 0)
+        syscall win_set_font(46)
+        tw = len(c) * 28
+        syscall win_textc(fdiv(W, 2), 228, c)
+        syscall win_mono(0)
+        syscall win_set_style(0, 0, 0)
+
+        if (tDone == 1) {
+            syscall win_set_color(255, 69, 58)
+            syscall win_set_font(13)
+            syscall win_textc(fdiv(W, 2), 300, "时间到")
+        }
+
+        // 预设 chip
+        i = 0
+        while (i < 5) {
+            x = 24 + i * 76
+            y = 392
+            syscall win_theme(4)
+            syscall win_rrect(x, y, 68, 30, 8)
+            syscall win_theme(1)
+            syscall win_set_font(11)
+            syscall win_textc(x + 34, y + 9, presetLbl[i])
+            chipX.push(x); chipY.push(y); chipW.push(68); chipH.push(30); chipId.push(itoa(i)); chipN = chipN + 1
+            i = i + 1
+        }
+
+        // 操作按钮
+        x = fdiv(W, 2) - 96
+        if (tRun == 1) { syscall win_button("pause", x, 448, 56, 56) }
+        else { syscall win_button("play", x, 448, 56, 56) }
+        syscall win_theme(1)
+        syscall win_set_font(10)
+        if (tRun == 1) { label = "暂停" } else { label = "开始" }
+        syscall win_textc(x + 28, 510, label)
+
+        syscall win_button("minus", x + 68, 448, 56, 56)
+        syscall win_theme(1)
+        syscall win_textc(x + 96, 510, "-1分")
+
+        syscall win_button("plus", x + 136, 448, 56, 56)
+        syscall win_theme(1)
+        syscall win_textc(x + 164, 510, "+1分")
+
+        syscall win_button("reset", fdiv(W, 2) - 28, 528, 56, 56)
+        syscall win_theme(1)
+        syscall win_textc(fdiv(W, 2), 584, "复位")
+    }
+
+    syscall win_tick(16)
+}
+
+event fn on_click(ev: str) {
+    parts = split(ev, " ")
+    id = parts[1]
+    if (id == "globe") { view = 0 }
+    else if (id == "clock") { view = 1 }
+    else if (id == "stopwatch") { view = 2 }
+    else if (id == "timer") { view = 3 }
+    else if (id == "play" || id == "pause") {
+        if (view == 2) {
+            if (swRun == 1) { swAcc = swAcc + (syscall win_millis() - swStart); swRun = 0 }
+            else { swStart = syscall win_millis(); swRun = 1 }
+        } else if (view == 3) {
+            if (tRun == 1) {
+                tLeft = tEnd - syscall win_millis()
+                if (tLeft < 0) { tLeft = 0 }
+                tRun = 0
+            } else {
+                if (tDone == 1 || tLeft <= 0) { tLeft = tTotal * 1000; tDone = 0 }
+                tEnd = syscall win_millis() + tLeft
+                tRun = 1
+                tDone = 0
+            }
+        }
+    }
+    else if (id == "reset") {
+        if (view == 2) { swRun = 0; swAcc = 0; swStart = 0; laps = [] }
+        else if (view == 3) { tRun = 0; tDone = 0; tLeft = tTotal * 1000 }
+    }
+    else if (id == "lap") {
+        if (view == 2) {
+            if (swRun == 1) { swAcc = swAcc + (syscall win_millis() - swStart); swStart = syscall win_millis() }
+            swM = fdiv(swAcc, 60000)
+            swS = fdiv(swAcc - swM * 60000, 1000)
+            swC = fdiv(swAcc - swM * 60000 - swS * 1000, 10)
+            c = itoa(swM) + ":"
+            if (swS < 10) { c = c + "0" }
+            c = c + itoa(swS) + "."
+            if (swC < 10) { c = c + "0" }
+            c = c + itoa(swC)
+            laps.push(c)
+        }
+    }
+    else if (id == "plus") {
+        tTotal = tTotal + 60
+        if (tTotal > 5999) { tTotal = 5999 }
+        if (tRun == 0) { tLeft = tTotal * 1000; tDone = 0 }
+    }
+    else if (id == "minus") {
+        tTotal = tTotal - 60
+        if (tTotal < 60) { tTotal = 60 }
+        if (tRun == 0) { tLeft = tTotal * 1000; tDone = 0 }
+    }
+    else if (len(parts) >= 3) {
+        // 自绘 chip 命中
+        x = atoi(parts[1])
+        y = atoi(parts[2])
+        i = 0
+        found = -1
+        while (i < chipN) {
+            if (x >= chipX[i] && x <= chipX[i] + chipW[i] && y >= chipY[i] && y <= chipY[i] + chipH[i]) { found = i }
+            i = i + 1
+        }
+        if (found >= 0) {
+            tTotal = presetSec[atoi(chipId[found])]
+            tRun = 0
+            tDone = 0
+            tLeft = tTotal * 1000
+        }
+    }
+    syscall win_invalidate(win)
+}
+
+event fn on_key(ev: str) {
+    c = substr(ev, 4)
+    if (c == "1") { view = 0 }
+    else if (c == "2") { view = 1 }
+    else if (c == "3") { view = 2 }
+    else if (c == "4") { view = 3 }
+    else if (c == " ") { syscall win_audio_beep(880, 120) }
+    syscall win_invalidate(win)
+}

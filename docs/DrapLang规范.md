@@ -27,6 +27,7 @@
 | 注释 | `//` 到行尾 | `// 这是注释` |
 | 标识符 | 字母/下划线开头 | `count`, `my_var`, `Point` |
 | 整数 | 十进制 | `0`, `42`, `-7`（负号是运算符） |
+| 浮点 | 带小数点 | `0.5`, `3.14159`（参与 `fmul`/`fdiv` 等浮点运算；`*` `/` `%` 仍是整数语义） |
 | 字符串 | 双引号 | `"hello\n"`（`\n` 转义） |
 | 字符 | 单引号 | `'A'`（值为其码点整数） |
 | 布尔 | 关键字 | `true`(=1) / `false`(=0) |
@@ -103,7 +104,7 @@ import "utils"     // 需 Info.json 的 modules: ["utils"]
 
 ## 6. 表达式
 
-- 算术：`+ - * / %`（`/` `//` `%` 均为整数运算，向零取整）
+- 算术：`+ - * / %`（`*` 用 32 位整数乘法，`/` `%` 向零取整；**需要连续实数时用 `fmul` / `fdiv` / `fmod`**）
 - 比较：`< > <= >= == !=`（字符串按内容比较，`==` 同类型比较）
 - 逻辑：`&&` `||` `!`
 - 一元：`-x`，`!x`
@@ -135,6 +136,7 @@ import "utils"     // 需 Info.json 的 modules: ["utils"]
 | `rand()` | `() -> i32` | 伪随机整数 `[0, 32767]` |
 | `clamp(x, lo, hi)` | `(i32,i32,i32) -> i32` | 夹到区间 |
 | `sin(x)` `cos(x)` `log(x)` `exp(x)` | `(f) -> f` | 三角函数 / 对数 / 指数（弧度） |
+| `fmul(a,b)` `fdiv(a,b)` `fmod(a,b)` | `(f,f) -> f` | **真浮点**乘 / 除 / 取余（动画、矢量、比例换算用） |
 
 ### str（需 `import str`）
 | 函数 | 签名 | 说明 |
@@ -219,6 +221,46 @@ import "utils"     // 需 Info.json 的 modules: ["utils"]
 | `syscall win_label(x, y, text)` | i32,i32,str | i32 | 声明静态标签 |
 | `syscall win_input(id, x,y,w,h)` | str,i32×4 | i32 | 声明输入框（值跨帧保留） |
 | `syscall win_input_get(id)` | str | ★str | 读输入框当前值 |
+| `syscall win_set_input(id, val)` | str,str | i32 | 预填输入框内容 |
+| `syscall win_theme(slot)` | i32 | i32 | 取主题语义色并设为绘制色：0=bg 1=fg 2=accent 3=toolbar 4=sel |
+| `syscall win_set_theme(name)` | str | i32 | 切换系统主题（`"macos"`/`"windows"`） |
+| `syscall win_get_theme()` | —— | i32 | 读主题名（0=macos 1=windows） |
+| `syscall win_set_style(b,i,u)` | i32×3 | i32 | 文本样式：粗体 / 斜体 / 下划线（0/1） |
+| `syscall win_mono(on)` | i32 | i32 | 等宽字体开关 |
+| `syscall win_glyph(name, x, y, size)` | str,i32,i32,i32 | i32 | 画手绘图标（`folder`/`file`/`play`/`mic`…） |
+| `syscall win_app_icon(id, x, y, size)` | str,i32,i32,i32 | i32 | 画应用图标（squircle） |
+| `syscall win_app_list()` | —— | ★str | 枚举应用，每行 `id|name|category` |
+| `syscall win_app_launch(id)` | str | i32 | 启动应用 |
+| `syscall win_shell_exec(line)` | str | ★str | 执行宿主命令并取回输出 |
+| `syscall win_open_finder(path)` | str | i32 | 在 Finder 打开路径 |
+| `syscall win_trash(path)` | str | i32 | 移入废纸篓 |
+| `syscall win_get_open_path()` | —— | ★str | 启动时透传的初始路径 |
+| `syscall win_textc(cx, y, s)` | i32,i32,str | i32 | **居中**绘制文本（按 measureText 精确居中） |
+| `syscall win_line(x1,y1,x2,y2)` | i32×4 | i32 | 直线（当前色 / 线宽） |
+| `syscall win_circle(cx,cy,r,mode)` | i32×4 | i32 | 圆：mode 0=填充 1=描边 |
+| `syscall win_arc(cx,cy,r,a0,a1)` | i32×5 | i32 | 圆弧（角度制，0=右侧顺时针） |
+| `syscall win_rrect(x,y,w,h,rad)` | i32×5 | i32 | 圆角矩形（填充） |
+| `syscall win_alpha(a)` | i32 | i32 | 后续绘制透明度 0–100 |
+| `syscall win_set_line(w)` | i32 | i32 | 线宽 |
+| `syscall win_tick(ms)` | i32 | i32 | **逐帧重绘**：宿主按间隔注入 `paint`（0=停止），动画/实时显示用 |
+| `syscall win_millis()` | —— | i32 | 毫秒时间戳（帧内计时 / 秒表） |
+
+> **帧驱动**：`on_paint` 里调用 `win_tick(16)` 后，宿主每个间隔注入一次 `paint`，`on_paint` 重新计算状态并重绘即可做动画（DrapLang 无定时器，这是唯一动画通道）。
+
+### 时间扩展
+| 调用 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `syscall time_parts(ts, utc)` | i32,i32 | ★str | 时间分量 `"Y\|M\|D\|h\|m\|s\|wday"`；`utc` 非 0 用 UTC（世界时钟用） |
+
+### 音频 `win_audio*`（媒体类应用）
+| 调用 | 参数 | 返回 | 说明 |
+|------|------|------|------|
+| `syscall win_audio(cmd)` | i32 | i32 | 0=播放 1=暂停 2=停止 3=麦克风开 4=麦克风关 5=系统音 |
+| `syscall win_audio_open()` | —— | ★str | 弹宿主文件框加载音视频，返回文件名（空=取消） |
+| `syscall win_audio_seek(p)` | i32 | i32 | 跳转（千分比 0–1000） |
+| `syscall win_audio_state()` | —— | ★str | `"playing\|posMs\|lenMs\|name"` |
+| `syscall win_audio_band(i, n)` | i32,i32 | i32 | 第 i 个频段幅度 0–100（共 n 段） |
+| `syscall win_audio_beep(freq, ms)` | i32,i32 | i32 | 提示音 |
 
 ---
 

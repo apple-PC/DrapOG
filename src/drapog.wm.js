@@ -36,6 +36,7 @@ const TITLES = {
   finder: 'Finder', terminal: 'Terminal', hello: 'Hello', calc: 'Calc',
   conv: 'Conv', docedit: 'DocEdit', appmgr: '应用', edit: 'TextEdit', settings: '设置', about: '关于本机',
   trash: '废纸篓', thispc: '此电脑',
+  soundwave: '音波', chrono: '计时器',
 };
 
 export class WindowManager {
@@ -70,7 +71,7 @@ export class WindowManager {
     this.softKeyboard = { open: false };
 
     // dock/桌面 应用顺序（图标统一为 id 前两字母；guidemo/paint 演示应用已移除）
-    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'docedit', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc']
+    this.apps = ['finder', 'terminal', 'hello', 'calc', 'conv', 'docedit', 'appmgr', 'edit', 'settings', 'about', 'trash', 'thispc', 'soundwave', 'chrono']
       .map(id => ({ id, letter: appIcon(id), title: TITLES[id] || id }));
 
     this._appImpls = new Map();   // appId -> 实现

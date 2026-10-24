@@ -1,0 +1,10 @@
+{
+  "id": "chrono",
+  "name": "计时器",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "世界时间 / 时钟 / 秒表 / 计时器（时区换算、计次、环形倒计时与提示音）",
+  "category": "utilities"
+}

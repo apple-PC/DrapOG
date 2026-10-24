@@ -1,0 +1,379 @@
+// 音波 SoundWave —— 音频频谱可视化（DrapLang 原生重写版）
+// 原实现为 Web Audio + Canvas2D 的独立网页；此处改为 DrapLang 应用：
+//   · 频谱数据来自宿主音频引擎（win_audio_band），绘制用新矢量原语（win_line/win_circle/win_arc）
+//   · 逐帧动画靠 win_tick(16) 驱动 on_paint 重绘（语言层新增的帧驱动能力）
+//   · 配色跟随系统主题强调色（win_theme(2)），其余为媒体应用通用的深色底
+// 四种可视化：频谱柱 / 环形波 / 波形线 / 粒子
+import math
+import str
+
+entry fn main() -> i32 {
+    let win = syscall win_create("音波", 920, 600)
+
+    let W = 920
+    let H = 600
+    let TOP_H = 64
+    let BOT_H = 76
+
+    let mode = 0            // 0 频谱柱 1 环形波 2 波形线 3 粒子
+    let nB = 40             // 频段数
+    let bands = []          // 本帧频谱 0..100
+    let i = 0
+    let j = 0
+    let x = 0
+    let y = 0
+    let xx = 0
+    let yy = 0
+    let px = 0.0
+    let py = 0.0
+    let bw = 0.0
+    let hh = 0.0
+    let cx = 0.0
+    let cy = 0.0
+    let ang = 0.0
+    let rr = 0.0
+    let baseR = 0.0
+    let stageTop = 0
+    let stageBot = 0
+    let stageH = 0
+    let baseY = 0
+    let availH = 0
+
+    let phase = 0.0
+    let t0 = 0
+    let tms = 0
+    let bass = 0
+    let live = 0
+    let lvl = 0
+
+    let stt = ""
+    let sp = [""]
+    let playing = 0
+    let pos = 0
+    let fLen = 0
+    let srcName = ""
+    let c = ""
+    let id = ""
+    let parts = [""]
+    let pName = ""
+
+    // 粒子状态（一次初始化后每帧推进）
+    let pCount = 72
+    let pAng = []
+    let pRad = []
+    let pSpd = []
+    let pSize = []
+    let booted = 0
+    let pv = 0
+    let pr = 0
+
+    // 模式表（按钮 id / 中文名）
+    let modeIds = ["bars", "ring", "wave", "particles"]
+    let modeNames = ["频谱柱", "环形波", "波形线", "粒子"]
+
+    let mx = 0
+    let my = 0
+    let mw = 0
+    let mh = 0
+    let label = ""
+    let secs = 0
+    let mins = 0
+    let ms = 0
+    let lsecs = 0
+    let lmins = 0
+    let seg = 0
+    let frac = 0.0
+    let trackX = 0
+    let trackW = 0
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    stageTop = TOP_H
+    stageBot = H - BOT_H
+    stageH = stageBot - stageTop
+    tms = syscall win_millis()
+    if (t0 == 0) { t0 = tms }
+    phase = fdiv(tms - t0, 1000.0)
+
+    // —— 取音频状态 ——
+    stt = syscall win_audio_state()
+    sp = split(stt, "|")
+    playing = atoi(sp[0])
+    pos = atoi(sp[1])
+    fLen = atoi(sp[2])
+    srcName = sp[3]
+    live = 0
+    if (playing == 1) { live = 1 }
+
+    // —— 取频谱；无音源时用合成波，界面不至于死板 ——
+    bands = []
+    i = 0
+    while (i < nB) {
+        if (live == 1) {
+            bands.push(syscall win_audio_band(i, nB))
+        } else {
+            lvl = 26 + round(fmul(22.0, sin(fmul(phase, 1.6) + fmul(i, 0.34))))
+            if (lvl < 4) { lvl = 4 }
+            bands.push(lvl)
+        }
+        i = i + 1
+    }
+    bass = 0
+    i = 0
+    while (i < 6) { bass = bass + bands[i]; i = i + 1 }
+    bass = fdiv(bass, 6)
+    if (live == 0) { bass = 34 }
+
+    // —— 底色 ——
+    syscall win_set_color(8, 10, 16)
+    syscall win_fill_rect(0, 0, W, H)
+
+    // 舞台底部柔光（低透明度同心圆当辉光）
+    syscall win_set_color(26, 58, 104)
+    syscall win_alpha(10)
+    i = 0
+    while (i < 5) {
+        syscall win_circle(fdiv(W, 2), stageBot, fdiv(stageH, 1.2) - fmul(i, 26), 0)
+        i = i + 1
+    }
+    syscall win_alpha(100)
+
+    // —— 顶栏 ——
+    syscall win_set_color(16, 19, 27)
+    syscall win_fill_rect(0, 0, W, TOP_H)
+    syscall win_set_color(34, 39, 52)
+    syscall win_fill_rect(0, TOP_H - 1, W, 1)
+
+    syscall win_set_color(240, 244, 255)
+    syscall win_set_font(18)
+    syscall win_set_style(1, 0, 0)
+    syscall win_text(20, 14, "音波")
+    syscall win_set_style(0, 0, 0)
+    syscall win_set_font(11)
+    syscall win_set_color(124, 134, 156)
+    if (srcName == "") { syscall win_text(20, 38, "未加载音源 · 可点「打开」或「麦克风」") }
+    else { syscall win_text(20, 38, srcName) }
+
+    // 模式按钮（手绘图标 + 下方小标签）
+    i = 0
+    while (i < 4) {
+        mx = fdiv(W, 2) - 96 + i * 56
+        my = 6
+        // 选中态底片
+        if (i == mode) {
+            syscall win_set_color(30, 36, 50)
+            syscall win_rrect(mx - 3, my - 1, 42, 42, 9)
+        }
+        syscall win_button(modeIds[i], mx, my, 36, 36)
+        syscall win_set_font(10)
+        if (i == mode) { syscall win_set_color(120, 180, 255) } else { syscall win_set_color(112, 122, 142) }
+        label = modeNames[i]
+        syscall win_textc(mx + 18, 45, label)
+        i = i + 1
+    }
+
+    // 右侧动作按钮
+    syscall win_button("open", W - 158, 10, 40, 40)
+    if (playing == 1) { syscall win_button("pause", W - 110, 10, 40, 40) }
+    else { syscall win_button("play", W - 110, 10, 40, 40) }
+    syscall win_button("mic", W - 62, 10, 40, 40)
+
+    // —— 舞台：按模式绘制 ——
+    syscall win_theme(2)          // 之后填充使用主题强调色
+    if (mode == 0) {
+        // 频谱柱：中点上下对称的柱状 + 低透明度辉光
+        baseY = stageBot - 34
+        availH = stageH - 110
+        if (availH < 40) { availH = 40 }
+        bw = fdiv(W - 96, nB)
+        i = 0
+        while (i < nB) {
+            x = 48 + round(fmul(bw, i))
+            hh = fmul(availH, fdiv(bands[i], 100))
+            if (hh < 3) { hh = 3 }
+            syscall win_alpha(12)
+            syscall win_rrect(x + 2, baseY - hh - 6, round(bw) - 5, hh + 12, 3)
+            syscall win_alpha(100)
+            syscall win_rrect(x + 3, baseY - hh, round(bw) - 7, hh, 3)
+            syscall win_alpha(70)
+            syscall win_rrect(x + 3, baseY, round(bw) - 7, fmul(hh, 0.32), 3)
+            i = i + 1
+        }
+        syscall win_alpha(30)
+        syscall win_arc(fdiv(W, 2), stageBot + 120, fmul(W, 0.44), 180, 360)
+        syscall win_alpha(100)
+    } else if (mode == 1) {
+        // 环形波：放射线 + 外环 + 脉冲核心
+        cx = fdiv(W, 2)
+        cy = stageTop + fdiv(stageH, 2) + 6
+        baseR = 66 + fmul(bass, 0.32)
+        syscall win_alpha(18)
+        syscall win_set_line(10)
+        syscall win_arc(cx, cy, baseR + 26, 0, 360)
+        syscall win_alpha(100)
+        syscall win_set_line(2)
+        i = 0
+        while (i < nB * 2) {
+            ang = fmul(fdiv(i, nB * 2), 6.28318) + fmul(phase, 0.35)
+            j = i
+            if (j >= nB) { j = j - nB }
+            rr = baseR + 24 + fmul(bands[j], 1.15)
+            px = cx + fmul(cos(ang), baseR)
+            py = cy + fmul(sin(ang), baseR)
+            xx = cx + fmul(cos(ang), rr)
+            yy = cy + fmul(sin(ang), rr)
+            syscall win_alpha(90)
+            syscall win_line(round(px), round(py), round(xx), round(yy))
+            i = i + 1
+        }
+        syscall win_alpha(100)
+        syscall win_circle(cx, cy, bass + 10, 1)
+        syscall win_alpha(45)
+        syscall win_circle(cx, cy, fdiv(bass, 2) + 4, 0)
+        syscall win_alpha(100)
+    } else if (mode == 2) {
+        // 波形线：连续折线（镜像上下），模拟示波器
+        cx = fdiv(W, 2)
+        cy = stageTop + fdiv(stageH, 2)
+        syscall win_set_line(3)
+        i = 0
+        px = -1
+        py = 0
+        while (i < 72) {
+            x = 40 + round(fmul(fdiv(W - 80, 71), i))
+            j = i
+            while (j >= nB) { j = j - nB }
+            yy = cy - fmul(bands[j] - 50, 3.2) - fmul(14.0, sin(fmul(phase, 2.2) + fmul(i, 0.18)))
+            if (px >= 0) { syscall win_line(px, round(py), x, round(yy)) }
+            px = x
+            py = yy
+            i = i + 1
+        }
+        syscall win_alpha(35)
+        syscall win_set_line(1)
+        syscall win_line(40, cy, W - 40, cy)
+        syscall win_alpha(100)
+    } else {
+        // 粒子：极坐标环绕，半径随低频脉动
+        cx = fdiv(W, 2)
+        cy = stageTop + fdiv(stageH, 2)
+        if (booted == 0) {
+            i = 0
+            while (i < pCount) {
+                pAng.push(fmul(fdiv(rand(), 32768.0), 6.28318))
+                pRad.push(0.10 + fmul(fdiv(rand(), 32768.0), 0.90))
+                pSpd.push(0.3 + fmul(fdiv(rand(), 32768.0), 1.5))
+                pSize.push(1.2 + fmul(fdiv(rand(), 32768.0), 3.4))
+                i = i + 1
+            }
+            booted = 1
+        }
+        syscall win_alpha(10)
+        syscall win_circle(cx, cy, bass + 28, 0)
+        syscall win_alpha(100)
+        i = 0
+        while (i < pCount) {
+            pAng[i] = pAng[i] + fmul(pSpd[i], 0.012 + fmul(bass, 0.0004))
+            if (pAng[i] > 6.28318) { pAng[i] = pAng[i] - 6.28318 }
+            pr = 24 + fmul(pRad[i], 158) + fmul(bass, 0.30)
+            px = cx + fmul(cos(pAng[i]), pr)
+            py = cy + fmul(sin(pAng[i]), pr)
+            j = i
+            while (j >= nB) { j = j - nB }
+            syscall win_alpha(28 + fdiv(bands[j], 2))
+            syscall win_circle(round(px), round(py), round(pSize[i] + fdiv(bands[j], 34)), 0)
+            i = i + 1
+        }
+        syscall win_alpha(100)
+    }
+
+    // —— 底栏：进度 + 时间 ——
+    syscall win_set_color(16, 19, 27)
+    syscall win_fill_rect(0, H - BOT_H, W, BOT_H)
+    syscall win_set_color(34, 39, 52)
+    syscall win_fill_rect(0, H - BOT_H, W, 1)
+
+    trackX = 100
+    trackW = W - 200
+    syscall win_set_color(46, 51, 66)
+    syscall win_rrect(trackX, H - 46, trackW, 5, 2)
+    if (fLen > 0) {
+        frac = fdiv(pos, fLen)
+        syscall win_theme(2)
+        syscall win_rrect(trackX, H - 46, round(fmul(trackW, frac)), 5, 2)
+        syscall win_circle(trackX + round(fmul(trackW, frac)), H - 44, 5, 0)
+    }
+
+    syscall win_set_font(11)
+    syscall win_set_color(150, 160, 180)
+    ms = pos
+    secs = fdiv(ms, 1000)
+    mins = fdiv(secs, 60)
+    secs = secs - mins * 60
+    c = itoa(mins) + ":"
+    if (secs < 10) { c = c + "0" }
+    c = c + itoa(secs)
+    syscall win_text(trackX - 62, H - 51, c)
+
+    lsecs = fdiv(fLen, 1000)
+    lmins = fdiv(lsecs, 60)
+    lsecs = lsecs - lmins * 60
+    c = itoa(lmins) + ":"
+    if (lsecs < 10) { c = c + "0" }
+    c = c + itoa(lsecs)
+    syscall win_set_color(120, 130, 150)
+    syscall win_text(trackX + trackW + 14, H - 51, c)
+
+    syscall win_set_font(10)
+    syscall win_set_color(96, 106, 126)
+    if (live == 1) { syscall win_text(trackX, H - 30, "实时频谱 · 点击进度条可跳转") }
+    else { syscall win_text(trackX, H - 30, "预览波形（无音源）· 点击进度条可跳转") }
+
+    // 逐帧驱动：16ms ≈ 60fps
+    syscall win_tick(16)
+}
+
+event fn on_click(ev: str) {
+    parts = split(ev, " ")
+    id = parts[1]
+    if (id == "bars") { mode = 0 }
+    else if (id == "ring") { mode = 1 }
+    else if (id == "wave") { mode = 2 }
+    else if (id == "particles") { mode = 3 }
+    else if (id == "open") {
+        pName = syscall win_audio_open()
+        if (pName != "") { syscall win_audio(0) }
+    }
+    else if (id == "play") { syscall win_audio(0) }
+    else if (id == "pause") { syscall win_audio(1) }
+    else if (id == "mic") { syscall win_audio(3) }
+    else if (id == "stop") { syscall win_audio(2) }
+    else if (len(parts) >= 3) {
+        // 内容区点击：进度条跳转
+        x = atoi(parts[1])
+        y = atoi(parts[2])
+        if (y >= H - 60 && y <= H - 30 && x >= 60 && x <= W - 60) {
+            seg = 0
+            if (fLen > 0) {
+                seg = fdiv(fmul(x - 100, 1000), W - 200)
+                if (seg < 0) { seg = 0 }
+                if (seg > 1000) { seg = 1000 }
+                syscall win_audio_seek(seg)
+            }
+        }
+    }
+    syscall win_invalidate(win)
+}
+
+event fn on_key(ev: str) {
+    c = substr(ev, 4)
+    if (c == "1") { mode = 0 }
+    else if (c == "2") { mode = 1 }
+    else if (c == "3") { mode = 2 }
+    else if (c == "4") { mode = 3 }
+    else if (c == " ") { syscall win_audio(0) }
+    else if (c == "m" || c == "M") { syscall win_audio(3) }
+    syscall win_invalidate(win)
+}

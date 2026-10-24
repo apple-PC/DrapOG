@@ -1,0 +1,10 @@
+{
+  "id": "soundwave",
+  "name": "音波",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "音频频谱可视化（频谱柱 / 环形波 / 波形线 / 粒子，宿主音频引擎 + 矢量绘图原语）",
+  "category": "media"
+}
