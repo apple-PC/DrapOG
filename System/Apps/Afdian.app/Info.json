@@ -1,0 +1,12 @@
+{
+  "id": "afdian",
+  "name": "爱发电",
+  "type": "gui",
+  "entry": "main.drapp",
+  "version": "1.0",
+  "author": "DrapOG",
+  "description": "在浏览器打开作者的爱发电主页，支持 DrapOG 继续开发",
+  "category": "tools",
+  "icon": "♥",
+  "modules": []
+}
