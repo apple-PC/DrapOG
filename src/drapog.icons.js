@@ -154,4 +154,13 @@ export const BUILTIN_ICONS = {
       { t: 'c', cx: 50, cy: 52, r: 4, c: '#ff9500' },
     ],
   },
+,
+  afdian: {
+    bg: ['#ff9a5a', '#ff5e7e'],
+    fg: [
+      { t: 'c', cx: 38, cy: 40, r: 15, c: '#ffffff' },
+      { t: 'c', cx: 62, cy: 40, r: 15, c: '#ffffff' },
+      { t: 'p', pts: [[28, 44], [72, 44], [50, 80]], c: '#ffffff' },
+    ],
+  },
 };
