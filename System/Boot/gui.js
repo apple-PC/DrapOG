@@ -110,6 +110,9 @@ export async function startGUI(opts = {}) {
     registry.addDrap('chrono',    { name: '计时器',      type: 'gui',
       file: '../Apps/Chrono.app/main.drapp', baseUrl: import.meta.url,
       version: '1.0', author: 'DrapOG', description: '世界时间 / 时钟 / 秒表 / 计时器', category: 'utilities' });
+    registry.addDrap('afdian',   { name: '爱发电',        icon: '♥', type: 'gui',
+      file: '../Apps/Afdian.app/main.drapp', baseUrl: import.meta.url,
+      version: '1.0', author: 'DrapOG', description: '在浏览器打开作者的爱发电主页', category: 'tools' });
     // 挂载真实磁盘时，扫描 VFS 的 System/Apps/*.app 包（扩展发现，含各包 icon.json 手绘图标）
     registry.scan(vfs, 'System/Apps').catch(() => {});
 
