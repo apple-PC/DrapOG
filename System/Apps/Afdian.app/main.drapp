@@ -1,0 +1,65 @@
+// 爱发电 —— DrapOG 桌面入口（DrapLang GUI 应用）
+// 显示作者爱发电链接，提供「在浏览器打开」按钮。
+// 说明：DrapLang 画布应用无法可靠地调用系统浏览器或剪贴板，因此「打开」会尝试
+// win_shell_exec("open <url>")（若宿主支持则会跳转到浏览器，否则为空操作），
+// 链接本身始终明文显示在窗口中，用户可手动复制访问。
+entry fn main() -> i32 {
+    let win = syscall win_create("爱发电", 420, 300)
+    let W = 0
+    let H = 0
+    let status = "如果你喜欢 DrapOG，欢迎在爱发电支持作者～"
+    let URL = "https://afdian.com/a/apple-pc"
+}
+
+event fn on_paint() {
+    W = syscall win_w()
+    H = syscall win_h()
+    // 背景
+    syscall win_theme(0)
+    syscall win_fill_rect(0, 0, W, H)
+    // 顶部标题条（强调色）
+    syscall win_theme(2)
+    syscall win_fill_rect(0, 0, W, 54)
+    syscall win_set_color(255, 255, 255)
+    syscall win_set_font(18)
+    syscall win_text(20, 16, "爱发电 · 支持作者")
+    // 引导文字
+    syscall win_set_color(255, 94, 110)
+    syscall win_set_font(14)
+    syscall win_text(20, 74, "喜欢 DrapOG？在爱发电支持我，让项目继续成长：")
+    // 链接
+    syscall win_theme(1)
+    syscall win_set_font(13)
+    syscall win_text(20, 104, "主页：")
+    syscall win_set_color(10, 132, 255)
+    syscall win_text(66, 104, URL)
+    // 状态提示
+    syscall win_set_color(140, 140, 150)
+    syscall win_set_font(12)
+    syscall win_text(20, 130, status)
+    // 按钮
+    syscall win_button("在浏览器打开", 20, 168, 150, 36)
+    syscall win_button("复制链接", 184, 168, 110, 36)
+    return 0
+}
+
+event fn on_click(ev: str) {
+    let id = split(ev, " ")[1]
+    if (id == "在浏览器打开") {
+        syscall win_shell_exec("open " + URL)
+        status = "已尝试在浏览器打开；若未自动跳转，请手动访问上方链接。"
+        syscall win_invalidate(win)
+        return 0
+    }
+    if (id == "复制链接") {
+        syscall win_shell_exec("copy " + URL)
+        status = "已尝试复制链接到剪贴板。"
+        syscall win_invalidate(win)
+        return 0
+    }
+    return 0
+}
+
+event fn on_close() {
+    return 0
+}
