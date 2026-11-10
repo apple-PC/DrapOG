@@ -30,3 +30,6 @@ npm run serve   # 本地静态服务器预览（_dev/ 入口）
 - 新增 GUI 应用：用 `node tools/mkapp.mjs <id> [name] [--title "标题"] [--stdlib]` 生成，再在 `src/drapog.wm.js` 的 dock/桌面图标里注册。
 - **无损往返是硬约束**：`.drap → cc → .dbyte → dis → .dasm → asm → .dbyte` 两次字节必须一致。改 VM 指令/编译器/汇编/反汇编后必须跑测试。
 - 位宽（P0-1）已拍板搁置，勿动（`DECISION-位宽.md`）。
+## 💛 支持作者
+
+如果这个项目对你有帮助，欢迎在 [爱发电](https://afdian.com/a/apple-pc) 支持我，你的支持是我继续创作的动力～
