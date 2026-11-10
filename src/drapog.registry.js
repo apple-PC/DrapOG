@@ -84,6 +84,9 @@ export class AppRegistry {
     if (!items) return;
     for (const it of items) {
       if (it.type !== 'dir' || !it.name.endsWith('.app')) continue;
+      // 下划线开头是模板包（_template.app，Info.json 里留着 __APPID__ 等占位符，本身不是合法 JSON），
+      // 跳过它可以避免每次扫描都刷一条「跳过损坏的 .app 包」的误报警告。
+      if (it.name.startsWith('_')) continue;
       const base = dir + '/' + it.name;
       let info;
       try { info = JSON.parse(await vfs.read(base + '/Info.json')); }

@@ -2,6 +2,9 @@
 *.log
 _dev/__pycache__/
 
+# 依赖目录（本地安装，不入库）
+node_modules/
+
 # WorkBuddy 项目数据（非源码，含本地记忆）
 .workbuddy/
 
